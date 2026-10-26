@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { useVerification } from './VerificationProvider';
-import { countdown, failureLabel, panelVisible, stateLabel, terminal, type VerificationSession } from './model';
+import { countdown, panelVisible, stateLabel, terminal, type VerificationSession } from './model';
 import { nativeCandidateMessage } from './native-message';
+import { VerificationOutcome } from './VerificationOutcome';
 
 interface Presentation { url: string; origin: string; leaseId: string; epoch: number; generation: number }
 
-export function NativeVerificationPanel({ session }: { session: VerificationSession }) {
+export function NativeVerificationPanel({ session, onDismiss }: { session: VerificationSession; onDismiss?: () => void }) {
   const context = useVerification(), surface = useRef<HTMLDivElement>(null), iframe = useRef<HTMLIFrameElement>(null);
   const latest = useRef(session); latest.current = session;
   const lease = useRef<string | undefined>(undefined), submitting = useRef(false);
@@ -101,9 +102,10 @@ export function NativeVerificationPanel({ session }: { session: VerificationSess
     } catch { setError('状态已更新，请再次点击“我来操作”。'); void api.get(session.id).then(update).catch(() => undefined); }
     finally { setBusy(false); }
   };
-  return <section className={`verification-panel${finished ? ' is-finished' : ''}`} data-testid="verification-panel" data-state={session.state} aria-label="闲鱼验证操作区">
+  if (finished) return <VerificationOutcome session={session} onDismiss={onDismiss} />;
+  return <section className="verification-panel" data-testid="verification-panel" data-state={session.state} aria-label="闲鱼验证操作区">
     <div className="verification-summary"><p className="verification-state" role="status"><strong>{['settling', 'handoff', 'rechecking'].includes(session.state)
-      ? '正在复验账号连接' : stateLabel(session.state)}</strong>{active && <span className="verification-countdown" aria-label={`剩余 ${seconds} 秒`}>{seconds}s</span>}</p>
+      ? '正在复验账号连接' : stateLabel(session.state)}</strong>{['priority_wait', 'human_active'].includes(session.state) && <span className="verification-countdown" aria-label={`剩余 ${seconds} 秒`}>{seconds}s</span>}</p>
       {session.state === 'priority_wait' && <p>点击“我来操作”后，请在 30 秒内完成验证。</p>}
     </div>
     <div ref={surface} className="verification-image">
@@ -111,19 +113,15 @@ export function NativeVerificationPanel({ session }: { session: VerificationSess
         src={presentation.url} title="闲鱼原生安全验证" width="420" height="320" className="verification-native-frame"
         style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
         sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="strict-origin-when-cross-origin" />
-        : <div className="verification-result" role="status">{finished
-          ? session.state === 'succeeded' ? '本轮验证已完成，请以账号列表的实时连接状态为准。'
-            : session.state === 'completed_partial' ? '部分检查已完成，账号仍有待处理项目，请核对账号状态。' : failureLabel(session.failureCode)
-          : session.state === 'auto_active' ? '系统正在尝试验证…' : mine ? '正在等待验证结果…' : ['settling', 'handoff', 'rechecking'].includes(session.state)
+        : <div className="verification-result" role="status">{session.state === 'auto_active' ? '系统正在尝试验证…' : mine ? '正在等待验证结果…' : ['settling', 'handoff', 'rechecking'].includes(session.state)
             ? '正在检查原会话，请勿重复提交。' : '等待你接管验证'}</div>}
     </div>
     {error && <p className="verification-error" role="alert">{error}</p>}
-    <div className="modal-actions verification-actions">
-      {session.state === 'priority_wait' && <Button variant="primary" disabled={busy || !lease.current || seconds === 0} onClick={() => void claim()}>我来操作</Button>}
-      {finished && context && <Button variant="primary" disabled={busy || session.state === 'cancelled' && Boolean(session.subject.loginSessionId)} onClick={() => {
-        setBusy(true); void context.retry(session.subject).catch(() => setError('无法发起人工重试，请重新扫码授权。')).finally(() => setBusy(false));
-      }}>我来重试</Button>}
-    </div>
-    <p className="verification-footnote">验证完成不会自动重放发货、改价或消息发送操作。</p>
+    <footer className="verification-footer">
+      <p className="verification-footnote">请在当前窗口完成验证。</p>
+      <div className="modal-actions verification-actions">
+        {session.state === 'priority_wait' && <Button type="button" variant="primary" disabled={busy || !lease.current || seconds === 0} onClick={() => void claim()}>我来操作</Button>}
+      </div>
+    </footer>
   </section>;
 }

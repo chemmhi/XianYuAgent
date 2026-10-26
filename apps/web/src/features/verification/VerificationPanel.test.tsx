@@ -14,6 +14,12 @@ it('settling exposes no new controller and partial completion retains explicit b
   const partial = renderToStaticMarkup(<VerificationPanel session={session({ state: 'completed_partial', sourceResults: [{ source: 'unknown.write', status: 'probe_only' }] })} />);
   expect(partial).toContain('请核对原操作'); expect(partial).toContain('不会自动重放'); expect(partial).not.toContain('账号已连接');
 });
+it('preserves source results while business rechecking is still in progress', () => {
+  const html = renderToStaticMarkup(<VerificationPanel session={session({ state: 'rechecking', sourceResults: [
+    { source: 'im_listener', status: 'verified' }, { source: 'item.list', status: 'pending', nextAction: '等待商品检查' },
+  ] })} />);
+  expect(html).toContain('聊天连接'); expect(html).toContain('已验证'); expect(html).toContain('等待商品检查');
+});
 it('distinguishes an actual platform rejection from no manual answer and never treats a platform answer as account recovery', () => {
   const rejected = renderToStaticMarkup(<VerificationPanel session={session({state:'human_active',platformResult:{status:'rejected',code:300,sequence:1,challengeGeneration:1,observedAt:Date.now()}})} />);
   expect(rejected).toContain('平台未通过'); expect(rejected).toContain('300'); expect(rejected).not.toContain('账号已连接');

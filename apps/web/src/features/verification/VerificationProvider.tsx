@@ -149,7 +149,7 @@ export function VerificationProvider({ transport, baseUrl = '', accountLabels = 
         setCloseBusy(true); void release().then(() => { setConfirmClose(false); setOpened(false); }).catch(() => setNotice('交接未完成，请等待状态更新。')).finally(() => setCloseBusy(false));
       }}>{closeBusy ? '正在结束…' : closeHandsToSystem ? '交给系统并关闭' : '结束人工并关闭'}</Button></div></div>}
       {active.some(row => row.id !== current.id) && <nav className="verification-queue" aria-label="待验证账号">{active.map(row => <Button type="button" key={row.id} disabled={row.id !== current.id && current.state === 'human_active'} aria-current={row.id === current.id ? 'true' : undefined} onClick={() => open(row.id)}>{label(row)}</Button>)}</nav>}
-      <VerificationPanel key={current.id} session={current} />
+      <VerificationPanel key={current.id} session={current} onDismiss={() => setOpened(false)} />
     </VerificationDialog>}
   </Context.Provider>;
 }

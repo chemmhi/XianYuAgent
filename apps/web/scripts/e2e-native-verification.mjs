@@ -111,6 +111,12 @@ try {
   const persisted = await fixture.runtime.store.pool.query('select data from accounts.verification_sessions where id=$1', [row.id]);
   assert.doesNotMatch(JSON.stringify(persisted.rows), /native-frontend-passed|x5secdata|addCookieToHeader/);
   await page.screenshot({ path: join(evidence, 'native-success-mobile.png') });
+  assert.equal(await panel.getByRole('button', { name: '我来重试', exact: true }).count(), 0, 'success must not offer a new challenge');
+  const completedRounds = (await fixture.runtime.verification.coordinator.repository.list()).length;
+  await panel.getByRole('button', { name: '完成', exact: true }).click();
+  await page.locator('.verification-modal').waitFor({ state: 'detached' });
+  assert.equal((await fixture.runtime.verification.coordinator.repository.list()).length, completedRounds, 'completing the dialog creates no verification round');
+  assert.equal(nativeResults, 1);
   await writeFile(join(evidence, 'native-result.json'), JSON.stringify({ kind: 'controlled-native-iframe-real-ui-api-pg-original-chrome-im',
     state: final.state, automaticGestures: final.autoAttempts, frontendSlides, nativeResults, nativeLoads, streamConnections, pointerFrames,
     humanWindowMs: 30_000, registrations: fixture.stats.registrations, heartbeatAcks: fixture.stats.heartbeats, remainingRisks: risks.length,

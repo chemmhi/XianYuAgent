@@ -11,13 +11,14 @@ import { tmpdir } from 'node:os';
 const entry = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
-import {VerificationProvider} from '/src/features/verification/VerificationProvider.tsx';
+import {VerificationProvider,VerificationQrPanel} from '/src/features/verification/VerificationProvider.tsx';
 import {session} from '/src/features/verification/test-fixtures.ts';
 import '/src/styles.css';
 const actualNow=Date.now.bind(Date);let offset=0;Date.now=()=>actualNow()+offset;
-const sockets=new Set();let row=session({id:'native-review',subject:{accountId:'account'},presentationKind:'native_iframe',state:'priority_wait',
+const embedded=new URLSearchParams(location.search).has('qr');
+const sockets=new Set();let row=session({id:'native-review',subject:embedded?{loginSessionId:'qr-review'}:{accountId:'account'},presentationKind:'native_iframe',state:'priority_wait',
  serverTime:Date.now(),createdAt:Date.now(),expiresAt:Date.now()+300000,setupDeadline:Date.now()+8000,priorityDeadline:Date.now()+60000});
-let renewals=0,claims=0,cancels=0,results=0,streams=0,heldClaim,renewMode='normal',holdClaim=false;
+let renewals=0,claims=0,cancels=0,results=0,streams=0,retries=0,heldClaim,renewMode='normal',holdClaim=false,rejectRetry=false;
 const leaseId='native-review-lease',origin='https://h5api.m.goofish.com';
 const url=origin+'/h5/mtop.review.read/1.0/_____tmd_____/punish?synthetic-only=1&addCookieToHeader=1';
 const copy=()=>structuredClone(row);
@@ -48,6 +49,7 @@ const native=async(action,body)=>{
  throw Error('unknown native action');
 };
 const transport={get:async path=>path.includes('?active')?{sessions:[copy()],serverTime:Date.now()}:{session:copy()},post:async(path,body)=>{
+ if(path.endsWith('/retry')){retries++;if(rejectRetry)throw Error('controlled retry failure');publish({id:'native-retry',state:'priority_wait',priorityDeadline:Date.now()+60000,controller:undefined,presentation:undefined});return{session:copy()};}
  const match=/\\/native\\/(presentation|claim|result|cancel)$/.exec(path);if(!match)throw Error('no screenshot command is allowed');return native(match[1],body);
 }};
 // DOM is shared across Patchright's isolated evaluation world and the page's
@@ -59,9 +61,11 @@ document.addEventListener('native-review-command',()=>{
  else if(command.type==='finishClaim')heldClaim?.();
  else if(command.type==='advance')offset+=command.ms;
  else if(command.type==='advanceAndRenew'){offset+=command.ms;publish({presentation:{...row.presentation,until:Date.now()+4000}});}
- document.documentElement.setAttribute('data-native-review-stats',JSON.stringify({renewals,claims,cancels,results,streams,state:row.state}));
+ else if(command.type==='state')publish({state:command.value,failureCode:command.failureCode,controller:undefined,presentation:undefined});
+ else if(command.type==='rejectRetry')rejectRetry=true;
+ document.documentElement.setAttribute('data-native-review-stats',JSON.stringify({renewals,claims,cancels,results,streams,retries,state:row.state}));
 });
-createRoot(document.getElementById('root')).render(React.createElement(VerificationProvider,{transport,accountLabels:{account:'原生测试账号'}},null));
+createRoot(document.getElementById('root')).render(React.createElement(VerificationProvider,{transport,accountLabels:{account:'原生测试账号'}},embedded?React.createElement('section',{'data-testid':'qr-host'},React.createElement(VerificationQrPanel,{loginSessionId:'qr-review'})):null));
 `;
 
 const platformHtml = `<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:420px;height:320px;overflow:hidden}#track{position:absolute;left:60px;top:195px;width:300px;height:34px;background:#ddd}#end{position:absolute;left:355px;top:195px;width:5px;height:34px;background:green}</style><div id="track">受控原生平台页面</div><div id="end"></div><button id="candidate">发送受控候选</button><script>document.getElementById('candidate').onclick=()=>parent.postMessage(JSON.stringify({type:'child',content:JSON.stringify({x5sec:JSON.stringify({value:'synthetic-only',expire:Date.now()+60000,host:location.host})})}),'*');</script>`;
@@ -90,10 +94,10 @@ afterAll(async () => {
   }
 });
 
-async function pageFor(viewport = { width: 1440, height: 900 }): Promise<Page> {
+async function pageFor(viewport = { width: 1440, height: 900 }, query = ''): Promise<Page> {
   const page = await browser!.newPage({ viewport });
   await page.route('https://h5api.m.goofish.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: platformHtml }));
-  await page.goto(`${baseUrl}__native-panel-review.html`); await page.bringToFront();
+  await page.goto(`${baseUrl}__native-panel-review.html${query}`); await page.bringToFront();
   await expect.poll(() => page.getByRole('button', { name: '我来操作', exact: true }).isEnabled()).toBe(true);
   return page;
 }
@@ -110,6 +114,71 @@ async function claim(page: Page) {
   await page.locator('iframe[title="闲鱼原生安全验证"]').waitFor();
   await page.frameLocator('iframe').locator('#end').waitFor();
 }
+
+it.each([{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }])(
+  'balances terminal results and closes success without retrying on $name', async viewport => {
+    const page = await pageFor(viewport);
+    try {
+      const initial = await page.locator('.verification-modal').boundingBox();
+      for (const state of ['succeeded', 'failed', 'expired', 'cancelled', 'completed_partial', 'succeeded']) {
+        await control(page, { type: 'state', value: state, failureCode: 'VERIFICATION_PLATFORM_REJECTED' });
+        await page.locator(`[data-state="${state}"]`).waitFor();
+        const retryable = ['failed','expired','cancelled'].includes(state);
+        expect(await page.getByRole('button', { name: '我来重试', exact: true }).count()).toBe(retryable ? 1 : 0);
+        const geometry = await page.locator('.verification-modal').evaluate(element => {
+          const body = element.querySelector('.verification-modal-body')!, area = element.querySelector('.verification-image')!;
+          const content = element.querySelector('.verification-outcome-copy')!, footer = element.querySelector('.verification-footer')!;
+          const a = area.getBoundingClientRect(), c = content.getBoundingClientRect(), f = footer.getBoundingClientRect();
+          return { height: element.getBoundingClientRect().height, overflow: body.scrollHeight - body.clientHeight,
+            centered: Math.abs((c.top+c.bottom-a.top-a.bottom)/2), footerGap: body.getBoundingClientRect().bottom-f.bottom };
+        });
+        expect(geometry.height).toBe(initial!.height); expect(geometry.overflow).toBe(0);
+        expect(geometry.centered).toBeLessThan(2); expect(geometry.footerGap).toBeLessThan(2);
+        await page.screenshot({ path: join(tmpdir(), `xianyu-verification-outcome-${viewport.name}-${state}.png`) });
+      }
+      await page.getByRole('button', { name: '完成', exact: true }).click();
+      await page.locator('.verification-modal').waitFor({ state: 'detached' });
+      expect((await stats(page)).retries).toBe(0);
+    } finally { await page.close(); }
+  }, 30_000);
+
+it('retries a failed outcome through the existing manual-only retry and opens the new round', async () => {
+  const page = await pageFor();
+  try {
+    await control(page, { type: 'state', value: 'failed', failureCode: 'VERIFICATION_PLATFORM_REJECTED' });
+    await page.getByRole('button', { name: '我来重试', exact: true }).click();
+    await page.locator('[data-state="priority_wait"]').waitFor();
+    expect((await stats(page)).retries).toBe(1);
+    expect(await page.getByRole('button', { name: '我来操作', exact: true }).isVisible()).toBe(true);
+  } finally { await page.close(); }
+}, 30_000);
+
+it('keeps a failed outcome open with an error and restores its buttons if retry is rejected', async () => {
+  const page = await pageFor();
+  try {
+    await control(page, { type: 'state', value: 'failed' }); await control(page, { type: 'rejectRetry' });
+    await page.getByRole('button', { name: '我来重试', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: '无法发起人工重试' }).waitFor();
+    expect(await page.getByRole('button', { name: '我来重试', exact: true }).isEnabled()).toBe(true);
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator('.verification-modal').waitFor({ state: 'detached' });
+    expect((await stats(page)).retries).toBe(1);
+  } finally { await page.close(); }
+}, 30_000);
+
+it('keeps native QR success and cancellation inside the login host without a second dialog or retrying cancelled login', async () => {
+  const page = await pageFor(undefined, '?qr=1');
+  try {
+    for (const state of ['succeeded', 'cancelled']) {
+      await control(page, { type: 'state', value: state });
+      await page.locator(`[data-state="${state}"]`).waitFor();
+      expect(await page.getByTestId('qr-host').isVisible()).toBe(true);
+      expect(await page.locator('.verification-modal').count()).toBe(0);
+      expect(await page.getByRole('button', { name: /^(完成|关闭|我来重试)$/ }).count()).toBe(0);
+    }
+    expect((await stats(page)).retries).toBe(0);
+  } finally { await page.close(); }
+}, 30_000);
 
 it('removes the native iframe at the local human deadline even when its presentation lease remains valid and events stop', async () => {
   const page = await pageFor();

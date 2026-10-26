@@ -1,7 +1,7 @@
 /* Modal, typography and buttons use the existing modal/card and shared Button rules. */
 .verification-backdrop { z-index: 45; }
 .modal-card.verification-modal { display: flex; flex-direction: column; width: min(640px, 100%); height: 540px; max-height: calc(100dvh - 56px); overflow: hidden; }
-.verification-modal > .modal-head { flex: 0 0 auto; }
+.verification-modal > .modal-head { flex: 0 0 auto; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .verification-modal-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
 .verification-modal-body > :not(.verification-panel) { flex: 0 0 auto; }
 .verification-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; text-align: left; }
@@ -12,7 +12,16 @@
 .verification-countdown { color: var(--info); font-weight: 700; font-variant-numeric: tabular-nums; }
 .verification-image { --verification-image-height: min(320px, 60dvh); position: relative; display: grid; place-items: center; flex: 0 0 auto; height: var(--verification-image-height); min-width: 0; }
 .verification-modal-body .verification-image { --verification-image-height: 100cqh; container-type: size; flex: 1 1 320px; height: auto; min-height: 180px; }
-.verification-panel.is-finished .verification-image { container-type: normal; flex: 0 0 auto; height: auto; min-height: 0; place-items: start; }
+.verification-panel.is-finished .verification-image { container-type: normal; flex: 1 0 180px; height: auto; min-height: 180px; place-items: center; }
+.verification-outcome-copy { display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(100%, 360px); padding: 14px 0; text-align: center; }
+.verification-outcome-copy h3 { margin: 0; font-size: 16px; line-height: 1.4; }
+.verification-outcome-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: var(--bg); color: var(--muted); }
+.verification-outcome-icon svg { width: 28px; height: 28px; }
+.verification-outcome-icon.is-success { background: var(--success-bg); color: var(--success); }
+.verification-outcome-icon.is-warning { background: var(--warn-bg); color: var(--warn); }
+.verification-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.verification-footer .verification-footnote { flex: 1 1 180px; font-size: 12px; }
+.verification-footer .verification-actions { flex-shrink: 0; margin-left: auto; }
 .verification-image img { display: block; height: auto; user-select: none; -webkit-user-drag: none; }
 .verification-image.is-controlling img { cursor: grab; }
 .verification-image-placeholder { padding: 14px; color: var(--sub); }

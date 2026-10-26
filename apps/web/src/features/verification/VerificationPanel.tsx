@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { countdown, failureLabel, normalizedPoint, panelVisible, stateLabel, terminal, type VerificationSession } from './model';
+import { countdown, normalizedPoint, panelVisible, stateLabel, terminal, type VerificationSession } from './model';
 import { useVerification } from './VerificationProvider';
 import { useVerificationStream } from './useVerificationStream';
 import { Button } from '../../shared/ui/Button';
 import { ApiError } from '../../api/http';
 import { NativeVerificationPanel } from './NativeVerificationPanel';
+import { VerificationOutcome, VerificationSourceResults } from './VerificationOutcome';
 
-export function VerificationPanel({ session }: { session: VerificationSession }) {
-  return session.presentationKind === 'native_iframe' ? <NativeVerificationPanel session={session} /> : <RemoteVerificationPanel session={session} />;
+export function VerificationPanel({ session, onDismiss }: { session: VerificationSession; onDismiss?: () => void }) {
+  return session.presentationKind === 'native_iframe' ? <NativeVerificationPanel session={session} onDismiss={onDismiss} /> : <RemoteVerificationPanel session={session} onDismiss={onDismiss} />;
 }
-function RemoteVerificationPanel({ session }: { session: VerificationSession }) {
+function RemoteVerificationPanel({ session, onDismiss }: { session: VerificationSession; onDismiss?: () => void }) {
   const context = useVerification(), image = useRef<HTMLImageElement>(null), surface = useRef<HTMLDivElement>(null);
   const stream = useVerificationStream(session, image, surface);
   const [now, setNow] = useState(Date.now()), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -111,7 +112,8 @@ function RemoteVerificationPanel({ session }: { session: VerificationSession }) 
   }
   useEffect(() => { if (!mine || !stream.connectionId) pressed.current = undefined; }, [mine, stream.connectionId]);
   const finished = terminal(session);
-  return <section className={`verification-panel${finished ? ' is-finished' : ''}`} data-testid="verification-panel" data-state={session.state} aria-label="闲鱼验证操作区">
+  if (finished) return <VerificationOutcome session={session} onDismiss={onDismiss} />;
+  return <section className="verification-panel" data-testid="verification-panel" data-state={session.state} aria-label="闲鱼验证操作区">
     <div className="verification-summary">
       <p className="verification-state" role="status"><strong>{stateLabel(session.state)}</strong>{['priority_wait', 'human_active'].includes(session.state) && <span className="verification-countdown" aria-label={`剩余 ${seconds} 秒`}>{seconds}s</span>}</p>
       {session.state === 'priority_wait' && <p>{session.mode === 'manual_only' || !autoAllowed ? '仅人工操作，接管后有 30 秒。' : '接管后有 30 秒；倒计时结束将交给系统。'}</p>}
@@ -120,11 +122,7 @@ function RemoteVerificationPanel({ session }: { session: VerificationSession }) 
       {session.state === 'settling' && <p>已停止输入，正在等待平台结果，请勿重复提交。</p>}
     </div>
     <div ref={surface} className={`verification-image${controllable ? ' is-controlling' : ''}`}>
-      {finished ? <div className="verification-result">
-        {session.state === 'succeeded' && <p className="verification-success" role="status">本轮验证已完成，请以账号列表的实时连接状态为准。</p>}
-        {session.state === 'completed_partial' && <p role="status">验证部分完成，仍有业务需要确认。请先核对原操作结果，再回原页面处理。</p>}
-        {['failed', 'expired', 'cancelled'].includes(session.state) && <p className="verification-error" role="alert">{session.state === 'cancelled' ? '此次验证已取消，账号状态未被标记为恢复。' : failureLabel(session.failureCode)}</p>}
-      </div> : stream.frame ? <img ref={image} src={stream.frame.url} alt="闲鱼原会话验证画面" draggable={false} onLoad={stream.displayed}
+      {stream.frame ? <img ref={image} src={stream.frame.url} alt="闲鱼原会话验证画面" draggable={false} onLoad={stream.displayed}
         width={stream.frame.width} height={stream.frame.height}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up}
         style={{ width: `min(${stream.frame.width}px, 100%, calc(var(--verification-image-height) * ${stream.frame.width / stream.frame.height}))`,
@@ -138,17 +136,7 @@ function RemoteVerificationPanel({ session }: { session: VerificationSession }) 
         <Button variant="primary" type="button" disabled={busy || !stream.ready || !fresh || !stream.connectionId || seconds === 0} onClick={() => void command('claim', { action: 'claim', frameId: stream.frame?.frameId })}>我来操作</Button></>}
       {mine && <Button type="button" disabled={busy} onClick={() => void command('release', { toAuto: autoAllowed })}>{autoAllowed ? '交给系统' : '结束人工'}</Button>}
       {session.state === 'auto_active' && <Button type="button" disabled={busy} onClick={() => void command('request-human')}>下一次由我操作</Button>}
-      {finished && context && <Button variant="primary" type="button" disabled={busy || session.state === 'cancelled' && Boolean(session.subject.loginSessionId)} onClick={() => {
-        setBusy(true); setError(''); void context.retry(session.subject).catch(() => setError('无法发起人工重试，请重新扫码授权。')).finally(() => setBusy(false));
-      }}>我来重试</Button>}
     </div>
-    {session.sourceResults.length > 0 && <ul className="verification-results">{session.sourceResults.map(result => <li key={result.source}><span>{sourceLabel(result.source)}</span><span>{result.status === 'verified' ? '已验证' : result.status === 'probe_only' ? '请核对原操作' : result.status === 'superseded' ? '状态已更新' : '待处理'}</span>{result.nextAction && <small>{result.nextAction}</small>}</li>)}</ul>}
-    {finished && <p className="verification-footnote">验证完成不会自动重放发货、改价或消息发送操作。</p>}
+    <VerificationSourceResults results={session.sourceResults} />
   </section>;
-}
-function sourceLabel(source: string) {
-  if (/login.token|im_listener|^xianyu$/.test(source)) return '聊天连接';
-  if (/item.list/.test(source)) return '商品列表';
-  if (/sold.get|order/.test(source)) return '订单查询';
-  return '原业务操作';
 }

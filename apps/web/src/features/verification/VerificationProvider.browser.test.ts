@@ -344,7 +344,12 @@ it.each([
       expect(state.height).toBe(preparing.height); expect(state.top).toBeCloseTo(preparing.top, 1);
       expect(state.bottom).toBeLessThanOrEqual(viewport.height); expect(state.documentWidth).toBeLessThanOrEqual(viewport.width);
     }
-    expect(failed.slotHeight!).toBeLessThan(80);
+    // The result now fills the available area with a centered outcome, while
+    // keeping the footer at the bottom of the same fixed-height dialog.
+    expect(await page.locator('.verification-outcome-copy').evaluate(element => {
+      const copy = element.getBoundingClientRect(), slot = element.parentElement!.getBoundingClientRect();
+      return Math.abs((copy.top + copy.bottom - slot.top - slot.bottom) / 2);
+    })).toBeLessThan(2);
     if(viewport.name!=='low-screen')for(const state of [preparing,ready,reconnecting,failed]){
       expect(state.bodyScrollHeight!,JSON.stringify(state)).toBeLessThanOrEqual(state.bodyHeight!);
     }
