@@ -1498,6 +1498,7 @@ export interface Store {
   getModelProviderRouting(adminId: string, accountId: string): Promise<ModelProviderRoutingRecord | undefined>;
   upsertModelProviderRouting(input: { adminId: string; accountId: string; expectedVersion: number; mode: ModelProviderRoutingMode; preferredRole?: 'primary' | 'backup'; configGeneration: number }): Promise<ModelProviderRoutingRecord | undefined>;
   getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
+  listAutoReplyAgentEnabled(adminId: string, accountIds: string[]): Promise<Array<{ accountId: string; enabled: boolean | null }>>;
   upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
   getActiveAutoReplyRepairPolicy(accountId: string, now?: string): Promise<AutoReplyRepairPolicyBundle | undefined>;
   publishAutoReplyRepairPolicy(input: { accountId: string; bundle: AutoReplyRepairPolicyBundle; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle>;

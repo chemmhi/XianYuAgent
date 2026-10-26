@@ -30,7 +30,7 @@ describe('AccountDeleteModal', () => {
     expect(html).toContain('账号及全部数据将永久删除');
     expect(html).toContain('订单、商品、设置、聊天记录、登录凭证和图片附件');
     expect(html).toContain('青鱼旗舰店');
-    expect(html).toContain('账号 ID：sell••••6789 · 当前在线');
+    expect(html).toContain('账号 ID：sell••••6789 · 消息已连接');
     expect(html).toContain('data-testid="account-delete-cancel"');
     expect(html).toContain('data-testid="account-delete-confirm"');
   });

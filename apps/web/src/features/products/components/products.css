@@ -184,7 +184,7 @@ body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 
 .product-publish-field > span:first-child { color: var(--muted); }
 .product-publish-field em { color: var(--danger); font-style: normal; }
 .product-publish-field input, .product-publish-field select { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 14px; outline: none; }
-.product-publish-field input:focus, .product-publish-field select:focus, .product-publish-composer textarea:focus { border-color: #8EA8C3; box-shadow: 0 0 0 3px rgba(36,90,141,.12); }
+.product-publish-field input:focus, .product-publish-field select:focus { border-color: #8EA8C3; box-shadow: 0 0 0 3px rgba(36,90,141,.12); }
 .product-publish-field > small { color: var(--sub); font-size: 12px; line-height: 1.5; font-weight: 400; }
 .product-publish-error { color: var(--danger) !important; }
 .product-publish-auto-category { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
@@ -206,6 +206,7 @@ body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 
 
 .product-publish-composer { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
 .product-publish-composer:focus-within { border-color: #B9C8D9; box-shadow: 0 0 0 3px rgba(36,90,141,.10); }
+.product-publish-composer[data-invalid="true"], .product-publish-composer[data-invalid="true"]:focus-within { border-color: var(--danger); box-shadow: 0 0 0 3px rgb(185 28 28 / 9%); }
 .product-publish-attachments { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; padding: 9px 10px 0; }
 .product-publish-attachment { position: relative; width: 60px; height: 60px; overflow: hidden; border: 1px solid #BFDBFE; border-radius: 9px; background: #EFF6FF; }
 .product-publish-attachment-trigger { width: 100%; height: 100%; display: block; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
@@ -214,6 +215,7 @@ body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 
 .product-publish-attachment-remove:hover { color: var(--danger); }
 .product-publish-composer-editor { padding: 0 10px; line-height: normal; }
 .product-publish-composer textarea { width: 100%; min-height: 108px; max-height: 190px; resize: vertical; padding: 7px 0 10px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.6; }
+.product-publish-composer .product-publish-composer-editor .ui-textarea-control.product-publish-description-control { border: 0; border-radius: 0; outline: 0; box-shadow: none; background: transparent; }
 .product-publish-composer textarea::placeholder { color: #9CA3AF; }
 .product-publish-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 6px 10px 9px; border-top: 1px solid var(--border); }
 .product-publish-composer-tools, .product-publish-composer-actions { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--sub); font-size: 12px; line-height: 1.5; font-weight: 400; }

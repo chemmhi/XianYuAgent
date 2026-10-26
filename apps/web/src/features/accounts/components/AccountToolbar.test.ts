@@ -16,11 +16,13 @@ describe('AccountToolbar', () => {
     }));
 
     expect(html).toContain('aria-label="账号状态筛选"');
-    expect(html).toContain('aria-label="连接状态筛选"');
+    expect(html).toContain('aria-label="消息连接筛选"');
     expect(html).toContain('全部状态');
-    expect(html).toContain('全部连接');
-    expect(html).toContain('连接中');
-    expect(html).toContain('已过期');
+    expect(html).toContain('全部消息连接');
+    expect(html).toContain('正在连接消息服务');
+    expect(html).toContain('账号授权已过期');
+    expect(html).toContain('部分功能异常');
+    expect(html).toContain('需要安全验证');
     expect(html).toContain('aria-label="清空搜索"');
   });
 });

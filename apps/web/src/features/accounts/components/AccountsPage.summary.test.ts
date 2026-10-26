@@ -17,17 +17,17 @@ const account = (status: AccountVM['status'], connection: AccountVM['connection'
 });
 
 describe('account health summary', () => {
-  it('counts every non-healthy account as needing attention', () => {
+  it('counts independent message health and every non-healthy account as needing attention', () => {
     const result = summarize([
       account('connected', 'online', 'configured'),
-      account('degraded', 'unknown'),
+      account('degraded', 'online'),
       account('expired', 'expired'),
       account('disconnected', 'offline'),
       account('pending', 'connecting', 'missing'),
       account('disabled', 'offline'),
     ]);
 
-    expect(result.online).toBe(1);
+    expect(result.online).toBe(2);
     expect(result.needsAttention).toBe(4);
   });
 });

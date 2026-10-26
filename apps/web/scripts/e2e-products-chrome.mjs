@@ -10,7 +10,7 @@ const { createApp } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist
 const children = [];
 const chromeProfile = join(tmpdir(), `xianyu-agent-products-chrome-${process.pid}`);
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
-const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS2', 'screenshots');
+const screenshotDir = process.env.E2E_EVIDENCE_DIR ?? join(tmpdir(), 'xianyu-products-e2e');
 let apiRuntime;
 
 async function freePort() {
@@ -301,7 +301,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page after product flow');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts list for UI switch');
   await waitFor(async () => Boolean(await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(secondaryAccount.displayName)})`)), 'secondary account row for UI switch');
-  const switched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}) && candidate.querySelector('[data-testid="account-switch"]')?.textContent?.includes('切换账号')); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button) return false; button.click(); return true; })()`);
+  const switched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}) && candidate.querySelector('[data-testid="account-switch"]')?.textContent?.trim() === '切换'); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button) return false; button.click(); return true; })()`);
   if (!switched) throw new Error('secondary account switch button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === secondaryAccount.id, 'ui account switch persisted');
   const secondaryProductsMark = cdp.events.length;

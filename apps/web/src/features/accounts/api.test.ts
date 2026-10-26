@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createAccountsApi, createMockAccountsApi } from './api';
 
 describe('accounts canonical API adapter', () => {
+  it('uses the settings-backed boolean, preserves false, and does not interpret unavailable as off', async () => {
+    const api = createAccountsApi({ async get<T>() { return { items: [
+      { id: 'on', displayName: '已开启', autoReplyEnabled: true, aiEnabled: false, degradedSource: 'im' },
+      { id: 'off', displayName: '已关闭', autoReplyEnabled: false, aiEnabled: true },
+      { id: 'unavailable', displayName: '不可用', autoReplyEnabled: null, aiEnabled: true },
+      { id: 'legacy', displayName: '旧接口', aiEnabled: true },
+      { id: 'missing', displayName: '字段缺失' },
+    ] } as T; } });
+    const page = await api.list();
+    expect(page.items.map(row => row.aiEnabled)).toEqual([true, false, undefined, true, undefined]);
+    expect(page.items[0].degradedSource).toBe('im');
+  });
   it('unwraps the shared API envelope before mapping account rows', async () => {
     const api = createAccountsApi({
       async get<T>() {

@@ -23,13 +23,14 @@ export interface AccountVM {
   status: AccountStatus;
   connection: AccountConnectionVM;
   enabled: boolean;
-  aiEnabled: boolean;
+  aiEnabled?: boolean;
   credentialState: AccountCredentialState;
   version: number;
   updatedAt: string;
   riskCode?: string;
   riskSource?: string;
   riskFirstSeenAt?: string;
+  degradedSource?: string;
 }
 
 export interface AccountListFilters {

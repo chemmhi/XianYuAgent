@@ -1,4 +1,5 @@
 import { isRecoverableAutomationSkip } from './product-automation-execution-policy.js';
+import { messageConnectionStatus } from './account-connection.js';
 import { purgeMemoryRepairAccount } from './auto-reply-repair-repository.js';
 import { purgeMemoryAccount } from './account-purge-memory.js';
 import type { AccountDeletionCleanup } from './account-purge-postgres.js';
@@ -228,12 +229,11 @@ export class MemoryStore implements Store {
     const ids = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     for (const scope of this.scopes.values()) if (scope.adminId === adminId && scope.scope === 'manage' && this.deletionRequested.has(scope.accountId)) ids.add(scope.accountId);
     const search = query.search?.trim().toLowerCase();
-    const connectionStatus = (status: AccountRecord['status']): AccountListQuery['connectionStatus'] => status === 'connected' ? 'online' : status === 'pending' ? 'connecting' : status === 'expired' ? 'expired' : status === 'degraded' || status === 'verification_required' ? 'unknown' : 'offline';
     const filtered = [...this.accounts.values()].filter((account) => ids.has(account.id) && (account.status !== 'disabled' || this.deletionRequested.has(account.id)))
       .filter((account) => !query.accountId || account.id === query.accountId)
       .filter((account) => !search || [account.id, account.sellerRef, account.displayName ?? '', account.remark ?? ''].some((value) => value.toLowerCase().includes(search)))
       .filter((account) => !query.status || account.status === query.status)
-      .filter((account) => !query.connectionStatus || connectionStatus(account.status) === query.connectionStatus);
+      .filter((account) => !query.connectionStatus || messageConnectionStatus(account) === query.connectionStatus);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const total = filtered.length;
@@ -1915,6 +1915,13 @@ export class MemoryStore implements Store {
     if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
     const row = this.autoReplyAgentConfigs.get(accountId);
     return row ? { ...row } : undefined;
+  }
+  async listAutoReplyAgentEnabled(adminId: string, accountIds: string[]): Promise<Array<{ accountId: string; enabled: boolean | null }>> {
+    const rows: Array<{ accountId: string; enabled: boolean | null }> = [];
+    for (const accountId of new Set(accountIds)) {
+      if (await this.hasAccountScope(adminId, accountId)) rows.push({ accountId, enabled: this.autoReplyAgentConfigs.get(accountId)?.enabled ?? null });
+    }
+    return rows;
   }
   async upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;

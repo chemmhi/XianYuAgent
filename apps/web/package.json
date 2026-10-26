@@ -11,6 +11,7 @@
     "test:e2e:chrome": "node scripts/e2e-chrome.mjs",
     "test:e2e:verification": "node --import tsx scripts/e2e-manual-verification.mjs && node --import tsx scripts/e2e-verification-boundaries.mjs && npm run test:e2e:verification:native",
     "test:e2e:chrome:account-feedback": "node --import tsx scripts/e2e-account-feedback.mjs",
+    "test:e2e:chrome:account-overview": "node --import tsx scripts/e2e-account-overview.mjs",
     "test:e2e:chrome:brand-block": "node scripts/e2e-brand-block-chrome.mjs",
     "test:e2e:chrome:dashboard": "node scripts/e2e-dashboard-chrome.mjs",
     "test:e2e:chrome:dashboard:fullchain": "node scripts/e2e-dashboard-fullchain.mjs",

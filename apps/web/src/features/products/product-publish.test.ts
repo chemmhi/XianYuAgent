@@ -77,5 +77,20 @@ describe('product publish form contract', () => {
     expect(html).not.toContain('表情');
     expect(html).not.toContain('Provider');
   });
+
+  it('keeps the composer border on the wrapper and keeps validation linked to its textarea', () => {
+    const html = renderToStaticMarkup(createElement(ProductPublishComposer, { description: '', attachments: [], invalid: true, errorId: 'description-error', onDescriptionChange: vi.fn(), onAttachmentsChange: vi.fn(), onOptimize: vi.fn() }));
+    expect(html).toContain('data-invalid="true"');
+    expect(html).toContain('class="ui-textarea-control ui-textarea product-publish-description-control"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="description-error"');
+  });
+
+  it('keeps the description and its action buttons disabled together', () => {
+    const html = renderToStaticMarkup(createElement(ProductPublishComposer, { description: '草稿描述', attachments: [], disabled: true, onDescriptionChange: vi.fn(), onAttachmentsChange: vi.fn(), onOptimize: vi.fn() }));
+    expect(html).toMatch(/<textarea[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*aria-label="添加商品图片"[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*class="product-publish-ai-button"[^>]*disabled=""/);
+  });
 });
 

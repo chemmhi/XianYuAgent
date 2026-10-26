@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { PostgresStore } from '../src/store-postgres.js';
+import { testDatabase } from './invite-registration/test-support.mjs';
 
-const DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
+let database: Awaited<ReturnType<typeof testDatabase>>;
+let DATABASE_URL: string;
+test.before(async () => { database = await testDatabase(); DATABASE_URL = database.url; });
+test.after(async () => { await database?.close(); });
 
 test('Postgres risk episode, durable payment lease and delivery guard remain atomic', async () => {
   const first = new PostgresStore(DATABASE_URL);
@@ -38,7 +42,8 @@ test('Postgres risk episode, durable payment lease and delivery guard remain ato
     await second.updateAccount(admin.id, account.id, { status: 'connected' });
     assert.equal((await second.getAccount(admin.id, account.id))?.status, 'degraded');
     assert.equal((await second.listAccounts(admin.id, { status: 'connected' })).total, 0);
-    assert.equal((await second.listAccounts(admin.id, { connectionStatus: 'unknown' })).total, 1);
+    assert.equal((await second.listAccounts(admin.id, { connectionStatus: 'unknown' })).total, 0);
+    assert.equal((await second.listAccounts(admin.id, { connectionStatus: 'online' })).total, 1, 'fresh message heartbeat does not clear business degradation');
     await second.clearAccountDegraded({ adminId: admin.id, accountId: account.id, source: 'im', startedAt: new Date(Date.now() + 1000).toISOString() });
     assert.equal((await first.getAccount(admin.id, account.id))?.status, 'degraded');
     await second.clearAccountDegraded({ adminId: admin.id, accountId: account.id, source: 'sold.orders', startedAt: new Date(Date.now() + 1000).toISOString() });

@@ -24,6 +24,15 @@ const accountWithAvatar: AccountVM = {
 };
 
 describe('AccountTable', () => {
+  it('uses six clear columns and compact actions without a credential reference', () => {
+    const html = renderToStaticMarkup(createElement(AccountTable, {
+      accounts: [account], activeAccountId: account.id, page: 1, total: 1, totalPages: 1,
+      onPageChange: vi.fn(), onReauthorize: vi.fn(), onSwitch: vi.fn(), onDelete: vi.fn(),
+    }));
+    expect(html.match(/role="columnheader"/g)).toHaveLength(6);
+    expect(html).toContain('消息连接'); expect(html).not.toContain('凭证引用');
+    expect(html).toContain('>当前</button>'); expect(html).toContain('>授权</button>'); expect(html).toContain('>删除</button>');
+  });
   it.each(['ACCOUNT_VALIDATION_REQUIRED', 'RGV587', 'UNRECOGNIZED_VENDOR_CODE'])('renders Chinese risk status without leaking %s or the backend source', (riskCode) => {
     const html = renderToStaticMarkup(createElement(AccountTable, {
       accounts: [{ ...account, status: 'verification_required', riskCode, riskSource: 'seller.orders.internal', riskFirstSeenAt: '2026-10-20T04:55:19.000Z' }],
@@ -50,10 +59,10 @@ describe('AccountTable', () => {
 
     expect(html).toContain('<span role="columnheader">操作</span>');
     expect(html).toContain('data-testid="account-switch"');
-    expect(html).toContain('切换账号');
-    expect(html).toContain('扫码授权');
+    expect(html).toContain('>切换</button>');
+    expect(html).toContain('>授权</button>');
     expect(html).toContain('data-testid="account-delete"');
-    expect(html).toContain('删除账号');
+    expect(html).toContain('>删除</button>');
   });
 
   it('keeps the product-style three-part pagination summary', () => {

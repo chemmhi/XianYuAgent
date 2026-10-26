@@ -23,7 +23,8 @@ const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
 const chromeProfile = join(tmpdir(), `xianyu-agent-chrome-${process.pid}`);
-const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS1', 'screenshots');
+const screenshotDir = process.env.E2E_EVIDENCE_DIR ?? join(tmpdir(), 'xianyu-account-login-e2e');
+mkdirSync(screenshotDir, { recursive: true });
 const children = [];
 
 function spawnProcess(command, args, options = {}) {
@@ -217,7 +218,7 @@ async function run() {
     if (!row) return false;
     const switchButton = row.querySelector('[data-testid="account-switch"]');
     const deleteButton = row.querySelector('[data-testid="account-delete"]');
-    const reauthorizeButton = Array.from(row.querySelectorAll('button')).find((button) => ['扫码授权', '重新授权'].includes(button.textContent?.trim() ?? ''));
+    const reauthorizeButton = Array.from(row.querySelectorAll('button')).find((button) => button.textContent?.trim() === '授权');
     return Boolean(switchButton && deleteButton && reauthorizeButton);
   })()`);
   if (!hasOperationButtons) throw new Error('account operation buttons are missing');
@@ -234,7 +235,7 @@ async function run() {
   if (!switched) throw new Error('account switch action did not trigger');
   await waitFor(async () => await evaluate(cdp, `(() => {
     const row = Array.from(document.querySelectorAll('[role="row"]')).find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}));
-    return row?.querySelector('[data-testid="account-switch"]')?.textContent?.trim() === '当前账号';
+    return row?.querySelector('[data-testid="account-switch"]')?.textContent?.trim() === '当前';
   })()`), 'account switch result');
 
   mkdirSync(screenshotDir, { recursive: true });

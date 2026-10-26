@@ -51,6 +51,14 @@ export class AutoReplyAgentSettingsService {
     return this.toDefaultRecord(accountId);
   }
 
+  async enabledForAccounts(adminId: string, accountIds: string[]): Promise<Map<string, boolean>> {
+    if (accountIds.length === 0) return new Map();
+    // The scoped batch returns no row for inaccessible/deleting accounts and
+    // null only for an authorized account with no persisted configuration.
+    const rows = await this.store.listAutoReplyAgentEnabled(adminId, [...new Set(accountIds)]);
+    return new Map(rows.map(row => [row.accountId, row.enabled ?? this.defaults.enabled]));
+  }
+
   async update(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; requestId: string; traceId: string }): Promise<AutoReplyAgentConfigRecord> {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     const current = await this.get(input.adminId, input.accountId);

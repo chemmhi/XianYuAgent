@@ -9,6 +9,7 @@ import { AccountStateView } from './AccountStateView';
 import { AccountToolbar } from './AccountToolbar';
 import { AccountLoginModal } from './AccountLoginModal';
 import { AccountDeleteModal } from './AccountDeleteModal';
+import { CurrentAccountCard } from './CurrentAccountCard';
 import type { AccountLoginMethod } from './LoginMethodSelector';
 import { findReauthorizeAccount, readReauthorizeAccountId } from '../reauthorize-intent';
 import { accountErrorMessage } from '../feedback';
@@ -34,6 +35,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const page = controller.state.data?.page ?? controller.filters.page ?? 1;
   const totalPages = controller.state.data?.totalPages ?? 1;
   const metrics = summarize(accounts);
+  const selectedAccount = accounts.find(account => account.id === currentAccountId) ?? currentAccount;
   const loginAccount = loginAccountId ? accounts.find((account) => account.id === loginAccountId) ?? contextAccounts.find((account) => account.id === loginAccountId) : undefined;
   const requestedReauthorizeAccountId = useMemo(() => readReauthorizeAccountId(typeof window === 'undefined' ? '' : window.location.search), []);
 
@@ -107,8 +109,8 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
       <div className="kpi-grid three accounts-domain-kpis">
-        <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个在线</span><small>当前可用连接</small></div></article>
-        <article className="card kpi-card"><div className="kpi-label">当前账号</div><div className="kpi-value">{currentAccount?.displayName?.slice(-1) ?? '—'}</div><div className="kpi-delta"><span className="tone-info">账号上下文</span><small>{currentAccount?.displayName ?? '请先选择账号'}</small></div></article>
+        <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个消息已连接</span><small>当前列表</small></div></article>
+        <CurrentAccountCard account={selectedAccount} />
         <article className="card kpi-card"><div className="kpi-label">需要处理</div><div className="kpi-value">{metrics.needsAttention}</div><div className="kpi-delta"><span className={metrics.needsAttention > 0 ? 'tone-warn' : 'tone-ok'}>{metrics.needsAttention > 0 ? '需要刷新或补凭证' : '状态健康'}</span><small>不展示敏感凭证</small></div></article>
       </div>
       <article className="card panel accounts-domain-panel">
@@ -124,7 +126,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
 
 export function summarize(accounts: AccountVM[]) {
   return {
-    online: accounts.filter((account) => account.status === 'connected' && account.connection.status === 'online').length,
+    online: accounts.filter((account) => account.connection.status === 'online').length,
     needsAttention: accounts.filter((account) => (account.status !== 'connected' && account.status !== 'disabled') || ['expired', 'unknown'].includes(account.connection.status) || ['refresh_required', 'missing'].includes(account.credentialState)).length,
   };
 }

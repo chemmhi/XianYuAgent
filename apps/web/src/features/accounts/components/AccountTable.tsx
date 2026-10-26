@@ -1,4 +1,5 @@
-import { AccountConnectionBadge, AccountCredentialBadge, AccountStatusBadge } from './AccountStatusBadge';
+import { AccountConnectionBadge, AccountStatusBadge } from './AccountStatusBadge';
+import { accountStatusDescription, autoReplyLabel } from '../presentation';
 import type { AccountVM } from '../types';
 import { VerificationAccountActions } from '../../verification/VerificationProvider';
 
@@ -19,10 +20,9 @@ export function AccountTable({ accounts, activeAccountId, page, total, totalPage
       <div className="accounts-domain-table" role="table" aria-label="账号列表">
         <div className="accounts-domain-row accounts-domain-head" role="row">
           <span role="columnheader">账号</span>
-          <span role="columnheader">状态</span>
-          <span role="columnheader">连接</span>
+          <span role="columnheader">账号状态</span>
+          <span role="columnheader">消息连接</span>
           <span role="columnheader">自动回复</span>
-          <span role="columnheader">凭证引用</span>
           <span role="columnheader">最近更新</span>
           <span role="columnheader">操作</span>
         </div>
@@ -37,20 +37,19 @@ export function AccountTable({ accounts, activeAccountId, page, total, totalPage
                 )}
               </span>
               <span>
-                <strong>{account.displayName}</strong>
+                <strong title={account.displayName}>{account.displayName}</strong>
                 <small>{account.remark || account.sellerRef}</small>
               </span>
             </div>
-            <span role="cell"><AccountStatusBadge status={account.status} riskCode={account.riskCode} /></span>
+            <span role="cell" className="accounts-domain-health"><AccountStatusBadge status={account.status} riskCode={account.riskCode} /><small>{accountStatusDescription(account)}</small></span>
             <span role="cell"><AccountConnectionBadge status={account.connection.status} /></span>
-            <span role="cell"><span className={account.aiEnabled ? 'accounts-domain-enabled' : 'accounts-domain-muted'}>{account.aiEnabled ? '已启用' : '未启用'}</span></span>
-            <span role="cell"><AccountCredentialBadge state={account.credentialState} /></span>
+            <span role="cell"><span className={account.aiEnabled ? 'accounts-domain-enabled' : 'accounts-domain-muted'}>{autoReplyLabel(account.aiEnabled)}</span></span>
             <span role="cell" className="accounts-domain-updated">{formatUpdatedAt(account.updatedAt)}</span>
             <span role="cell" className="accounts-domain-row-actions">
               {account.status === 'verification_required' && <VerificationAccountActions accountId={account.id} />}
-              <button className={account.id === activeAccountId ? 'btn primary' : 'btn ghost'} type="button" data-testid="account-switch" onClick={() => onSwitch(account)} disabled={account.id === activeAccountId || account.status === 'disabled'}>{account.id === activeAccountId ? '当前账号' : '切换账号'}</button>
-              <button className={account.status === 'connected' ? 'btn ghost' : 'btn primary'} type="button" onClick={() => onReauthorize(account)}>{account.status === 'connected' ? '重新授权' : '扫码授权'}</button>
-              <button className="btn danger" type="button" data-testid="account-delete" onClick={() => onDelete(account)}>删除账号</button>
+              <button className={account.id === activeAccountId ? 'btn primary' : 'btn ghost'} type="button" data-testid="account-switch" onClick={() => onSwitch(account)} disabled={account.id === activeAccountId || account.status === 'disabled'}>{account.id === activeAccountId ? '当前' : '切换'}</button>
+              <button className={['expired', 'pending'].includes(account.status) ? 'btn primary' : 'btn ghost'} type="button" onClick={() => onReauthorize(account)}>授权</button>
+              <button className="btn danger" type="button" data-testid="account-delete" onClick={() => onDelete(account)}>删除</button>
             </span>
           </div>
         ))}

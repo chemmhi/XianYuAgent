@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createServer } from 'vite';
 import { chromium } from 'patchright';
 import { createApp } from '../../api/src/app.ts';
 
 // Isolated real API + MemoryStore: no external Xianyu calls or user data.
 const runtime = createApp({ host: '127.0.0.1', port: 0, allowInMemory: true, cookieSecure: false, xianyuQrMode: 'stub', sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000 });
-const evidenceDir = join(import.meta.dirname, '../../../docs/evidence/account-feedback');
+const evidenceDir = process.env.E2E_EVIDENCE_DIR ?? join(tmpdir(), 'xianyu-account-feedback');
 let vite;
 let browser;
 try {
@@ -104,7 +105,7 @@ try {
 
     // Login errors cross the real API and use Chinese global feedback too.
     runtime.xianyu.verifyLogin = async () => ({ success: false, accountInvalid: false, errorCode: 'RAW_COOKIE_CODE', message: 'RAW_COOKIE_FAILURE' });
-    await page.getByRole('button', { name: '扫码授权', exact: true }).click();
+    await page.getByRole('button', { name: '授权', exact: true }).click();
     await page.locator('[data-login-method="cookie"]').click();
     await page.locator('.account-login-form textarea').fill('unb=feedback-seller; _m_h5_tk=test-only');
     await page.getByRole('button', { name: '验证 Cookie 并更新账号' }).click();
@@ -114,7 +115,7 @@ try {
     await toast.getByRole('button', { name: '关闭提示' }).click();
     await page.locator('[data-login-method="password"]').click();
     await page.getByRole('textbox', { name: '闲鱼账号', exact: true }).fill('test-only');
-    await page.getByLabel('密码', { exact: true }).fill('test-only');
+    await page.getByRole('textbox', { name: '密码', exact: true }).fill('test-only');
     await page.getByRole('button', { name: '登录并添加账号', exact: true }).click();
     await waitFor(async () => (await toast.innerText().catch(() => '')).includes('暂不支持账号密码登录'), 'password error translation');
     assert.equal(await page.locator('.account-login-form .inline-error').count(), 0);
@@ -125,7 +126,7 @@ try {
     runtime.qrLogin.create = async () => { throw new Error('RAW_QR_GENERATION_FAILURE'); };
     // Exercise the real adapter route while replacing its external boundary.
     runtime.config.xianyuQrMode = 'real';
-    await page.getByRole('button', { name: '扫码授权', exact: true }).click();
+    await page.getByRole('button', { name: '授权', exact: true }).click();
     await waitFor(async () => (await toast.innerText().catch(() => '')).includes('二维码登录失败'), 'QR generation failure toast');
     assert.equal(await page.locator('.qr-login-error[role="alert"]').count(), 0);
     assert.doesNotMatch(await page.locator('body').innerText(), /RAW_QR_GENERATION_FAILURE|QR_GENERATE_FAILED/);
@@ -141,14 +142,33 @@ try {
     await waitFor(async () => (await toast.innerText().catch(() => '')).includes('账号列表加载失败'), 'list failure toast');
     assert.equal(await page.locator('.accounts-domain-state-error[role="alert"]').count(), 0);
     assert.doesNotMatch(await page.locator('body').innerText(), /RAW_ACCOUNT|INTERNAL_ERROR/);
+    // Exercise this action while the backend still fails. Once restored, the
+    // list's normal refresh can correctly dismiss the toast before a click.
+    // Hold pageSize=20 responses to observe manual loading: the normal silent
+    // poll cannot produce this state, even if it fires during the assertion.
+    let releaseListRetry;
+    const listRetryGate = new Promise(resolve => { releaseListRetry = resolve; });
+    runtime.store.listAccounts = async (_adminId, query) => {
+      if (query?.pageSize === 20) await listRetryGate;
+      throw new Error('RAW_ACCOUNT_DATABASE_FAILURE');
+    };
+    const retriedListFailure = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/api/v1/accounts' && url.searchParams.get('pageSize') === '20' && response.status() === 500;
+    });
+    try {
+      await toast.getByRole('button', { name: '重新加载' }).click();
+      await page.getByText('正在加载账号列表…', { exact: true }).waitFor({ timeout: 1500 });
+    } finally { releaseListRetry(); }
+    await retriedListFailure;
+    await waitFor(async () => (await toast.innerText().catch(() => '')).includes('账号列表加载失败'), 'list retry still reports the active failure');
     await waitFor(async () => (await toast.innerText().catch(() => '')).includes('账号状态刷新失败'), 'global account refresh failure');
     assert.equal(await page.locator('.app-toast').count(), 1);
     assert.equal(await page.locator('.account-risk-banner').count(), 0);
     runtime.store.listAccounts = listAccounts;
     await toast.getByRole('button', { name: '重试', exact: true }).click();
-    await waitFor(async () => (await toast.innerText().catch(() => '')).includes('账号列表加载失败'), 'queued list error after account refresh recovery');
-    await toast.getByRole('button', { name: '重新加载' }).click();
     await page.getByRole('table').waitFor();
+    await waitFor(async () => await toast.count() === 0, 'both recovered account reads dismiss their stale errors');
 
     // Delete failure keeps the dialog available and reports only via toast.
     const deleteAccount = runtime.store.deleteAccount.bind(runtime.store);

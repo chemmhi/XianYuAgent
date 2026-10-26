@@ -1,4 +1,5 @@
 import { isRecoverableAutomationSkip, RECOVERABLE_AUTOMATION_SKIP_REASONS } from './product-automation-execution-policy.js';
+import { ACCOUNT_MESSAGE_CONNECTION_SQL } from './account-connection.js';
 import { purgeAccountRows, type AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
 import { Pool, type PoolClient } from 'pg';
@@ -245,11 +246,10 @@ export class PostgresStore implements Store {
     const addParam = (value: unknown) => { params.push(value); return `$${params.length}`; };
     const search = query.search?.trim();
     if (query.accountId) conditions.push(`a.id = ${addParam(query.accountId)}`);
-    if (search) { const param = addParam(`%${search}%`); conditions.push(`(a.id ILIKE ${param} OR a.seller_ref ILIKE ${param} OR a.display_name ILIKE ${param} OR a.remark ILIKE ${param})`); }
+    if (search) { const param = addParam(`%${search}%`); conditions.push(`(a.id::text ILIKE ${param} OR a.seller_ref ILIKE ${param} OR a.display_name ILIKE ${param} OR a.remark ILIKE ${param})`); }
     if (query.status) conditions.push(`${effectiveStatus} = ${addParam(query.status)}`);
     if (query.connectionStatus) {
-      const statusByConnection: Record<Exclude<NonNullable<AccountListQuery['connectionStatus']>, 'unknown'>, AccountRecord['status']> = { online: 'connected', connecting: 'pending', expired: 'expired', offline: 'disconnected' };
-      conditions.push(query.connectionStatus === 'unknown' ? `${effectiveStatus} IN ('degraded', 'verification_required')` : `${effectiveStatus} = ${addParam(statusByConnection[query.connectionStatus])}`);
+      conditions.push(`${ACCOUNT_MESSAGE_CONNECTION_SQL} = ${addParam(query.connectionStatus)}`);
     }
     const where = conditions.join(' AND ');
     const page = query.page ?? 1;
@@ -2320,6 +2320,16 @@ export class PostgresStore implements Store {
           and (scope.expires_at is null or scope.expires_at>now())
       )`, [adminId, accountId]);
     return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
+  }
+  async listAutoReplyAgentEnabled(adminId: string, accountIds: string[]): Promise<Array<{ accountId: string; enabled: boolean | null }>> {
+    if (accountIds.length === 0) return [];
+    const result = await this.pool.query(`select a.id, c.account_id is not null as has_config, c.config_json->'enabled' as enabled
+      from accounts.accounts a left join settings.auto_reply_agent_account_configs c on c.account_id=a.id
+      where a.id=any($2::uuid[]) and a.status<>'disabled' and exists (
+        select 1 from auth.account_scopes scope where scope.account_id=a.id and scope.admin_id=$1
+        and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())
+      )`, [adminId, accountIds]);
+    return result.rows.map(row => ({ accountId: String(row.id), enabled: row.has_config ? Boolean(row.enabled) : null }));
   }
   async upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
     const current = await this.getAutoReplyAgentConfig(input.adminId, input.accountId);

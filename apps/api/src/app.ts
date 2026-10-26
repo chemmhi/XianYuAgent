@@ -1,4 +1,6 @@
 import { VerificationRuntime, type VerificationRuntimeOptions } from './verification-runtime.js';
+import { accountOverviews } from './account-overview.js';
+import { connectionView } from './account-connection.js';
 import { VerificationRealtime } from './verification-realtime.js';
 import { verificationHttp } from './verification-http.js';
 import { VerificationError } from './verification-domain.js';
@@ -1352,7 +1354,11 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, { acknowledged: await store.acknowledgeRiskNotification(authContext.admin.id, riskNotificationMatch[1]) }));
   }
   const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection|connection\/verify))?$/);
-  if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.list(authContext.admin.id, parseAccountListQuery(ctx.query))).body };
+  if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') {
+    const page = await accounts.list(authContext.admin.id, parseAccountListQuery(ctx.query));
+    const items = await accountOverviews(page.items, authContext.admin.id, runtime.autoReplyAgentSettings);
+    return { statusCode: 200, body: success(ctx, { ...page, items }).body };
+  }
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'POST') {
     const result = await mutation(runtime, ctx, authContext, undefined, async () => {
       const account = await accounts.create({ adminId: authContext.admin.id, platform: String(ctx.body.platform ?? ''), sellerRef: String(ctx.body.sellerRef ?? ''), displayName: typeof ctx.body.displayName === 'string' ? ctx.body.displayName : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
@@ -1362,7 +1368,11 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
   if (accountMatch) {
     const accountId = decodeURIComponent(accountMatch[1]);
-    if (!accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.get(authContext.admin.id, accountId)).body };
+    if (!accountMatch[2] && ctx.method === 'GET') {
+      const account = await accounts.get(authContext.admin.id, accountId);
+      const [overview] = await accountOverviews([account], authContext.admin.id, runtime.autoReplyAgentSettings);
+      return { statusCode: 200, body: success(ctx, overview).body };
+    }
      if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { sellerRef: optionalString(ctx.body.sellerRef), displayName: optionalString(ctx.body.displayName), remark: optionalString(ctx.body.remark), avatarUrl: optionalString(ctx.body.avatarUrl), platformUserId: optionalString(ctx.body.platformUserId), status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
      if (!accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.delete({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { deleted: true }); });
     if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
@@ -1922,26 +1932,6 @@ async function mutation(runtime: AppRuntime, ctx: RequestContext, authContext: A
   return { statusCode: result.statusCode, body: result.body };
 }
 function setSessionCookies(response: ServerResponse, csrfToken: string, sessionId: string, secure: boolean): void { setCookie(response, 'session_id', sessionId, { httpOnly: true, secure }); setCookie(response, 'csrf_token', csrfToken, { secure }); }
-
-function connectionView(account: { status: string; lastConnectedAt?: string; riskCode?: string; riskSource?: string; riskFirstSeenAt?: string; transportStatus?: string; transportSeenAt?: string }) {
-  const transportFresh = account.transportStatus === 'connected' && account.transportSeenAt !== undefined && Date.parse(account.transportSeenAt) > Date.now() - 15_000;
-  const status = transportFresh && !['verification_required', 'expired', 'disabled'].includes(account.status)
-    ? 'online'
-    : account.status === 'pending'
-      ? 'connecting'
-      : account.status === 'expired'
-        ? 'expired'
-        : account.status === 'degraded' || account.status === 'verification_required'
-          ? 'unknown'
-          : 'offline';
-  return {
-    status,
-    lastConnectedAt: account.lastConnectedAt,
-    failureCode: account.status === 'verification_required' ? account.riskCode ?? 'ACCOUNT_VALIDATION_REQUIRED' : account.status === 'degraded' ? 'ADAPTER_UNKNOWN' : undefined,
-    failureMessage: account.status === 'verification_required' ? `闲鱼要求安全验证（${account.riskSource ?? '账号'}）` : account.status === 'degraded' ? '外部闲鱼连接结果未知，需要人工复核。' : undefined,
-    failureAt: account.riskFirstSeenAt,
-  };
-}
 
 function toQrSessionView(session: { id: string; accountId?: string; status: string; expiresAt: string; failureCode?: string }) {
   // Keep the historical login-session `id` field while exposing the

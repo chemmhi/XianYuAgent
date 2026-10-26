@@ -50,7 +50,7 @@ export function ProductPublishComposer({ description, attachments, invalid, erro
   }
 
   return <>
-    <div className="product-publish-composer" data-testid="product-publish-composer">
+    <div className="product-publish-composer" data-testid="product-publish-composer" data-invalid={invalid || undefined}>
       {attachments.length > 0 && <div className="product-publish-attachments" aria-label="商品图片附件">
         {attachments.map((attachment, index) => <div className="product-publish-attachment" key={attachment.id}>
           <button className="product-publish-attachment-trigger" type="button" aria-label={`预览商品图片 ${index + 1}`} onClick={() => setPreviewUrl(attachment.url)} disabled={disabled}>

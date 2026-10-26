@@ -44,7 +44,8 @@ test('degraded state clears only after a newer success from its own source', asy
   await store.updateAccount(admin.id, account.id, { status: 'connected' });
   assert.equal((await store.getAccount(admin.id, account.id))?.status, 'degraded');
   assert.equal((await store.listAccounts(admin.id, { status: 'connected' })).total, 0);
-  assert.equal((await store.listAccounts(admin.id, { connectionStatus: 'unknown' })).total, 1);
+  assert.equal((await store.listAccounts(admin.id, { connectionStatus: 'unknown' })).total, 0);
+  assert.equal((await store.listAccounts(admin.id, { connectionStatus: 'online' })).total, 1, 'fresh message heartbeat is independent of an unresolved business operation');
   await store.clearAccountDegraded({ adminId: admin.id, accountId: account.id, source: 'im', startedAt: new Date(Date.now() + 1000).toISOString() });
   await store.clearAccountDegraded({ adminId: admin.id, accountId: account.id, source: 'sold.orders', startedAt: '2026-01-01T00:00:00.000Z' });
   assert.equal((await store.getAccount(admin.id, account.id))?.status, 'degraded');

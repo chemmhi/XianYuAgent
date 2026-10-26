@@ -1,12 +1,5 @@
 import type { AccountVM } from '../types';
-
-const connectionLabels: Record<AccountVM['connection']['status'], string> = {
-  online: '当前在线',
-  offline: '当前离线',
-  connecting: '连接中',
-  expired: '连接已过期',
-  unknown: '连接状态未知',
-};
+import { messageConnectionLabels } from '../presentation';
 
 export function AccountDeleteModal({ account, submitting = false, onClose, onConfirm }: {
   account: AccountVM;
@@ -31,7 +24,7 @@ export function AccountDeleteModal({ account, submitting = false, onClose, onCon
           <span className="account-delete-avatar">
             {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : account.displayName.slice(-1)}
           </span>
-          <div><strong>{account.displayName}</strong><span>账号 ID：{maskIdentifier(accountReference)} · {connectionLabels[account.connection.status]}</span></div>
+          <div><strong>{account.displayName}</strong><span>账号 ID：{maskIdentifier(accountReference)} · {messageConnectionLabels[account.connection.status]}</span></div>
         </div>
       </div>
       <div className="modal-actions">

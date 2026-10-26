@@ -44,12 +44,14 @@ interface CanonicalAccountResponse {
   connection?: { status: AccountConnectionStatus; lastConnectedAt?: string; latencyMs?: number; failureCode?: string; failureMessage?: string };
   enabled?: boolean;
   aiEnabled?: boolean;
+  autoReplyEnabled?: boolean | null;
   credentialState?: AccountCredentialState;
   version?: number;
   updatedAt?: string;
   riskCode?: string;
   riskSource?: string;
   riskFirstSeenAt?: string;
+  degradedSource?: string;
   transportStatus?: 'connecting' | 'connected' | 'disconnected' | 'failed';
   transportSeenAt?: string;
 }
@@ -81,13 +83,14 @@ function toAccountVM(account: CanonicalAccountResponse): AccountVM {
     status: normalizedStatus,
     connection: { status: account.connection?.status ?? (normalizedStatus === 'verification_required' || normalizedStatus === 'degraded' ? 'unknown' : normalizedStatus === 'expired' ? 'expired' : transportFresh ? 'online' : account.transportStatus === 'connecting' ? 'connecting' : normalizedStatus === 'pending' ? 'connecting' : 'offline'), lastConnectedAt: account.connection?.lastConnectedAt, latencyMs: account.connection?.latencyMs, failureCode: account.connection?.failureCode, failureMessage: account.connection?.failureMessage },
     enabled: account.enabled ?? true,
-    aiEnabled: account.aiEnabled ?? false,
+    aiEnabled: account.autoReplyEnabled === null ? undefined : account.autoReplyEnabled ?? account.aiEnabled,
     credentialState: account.credentialState ?? (normalizedStatus === 'connected' ? 'configured' : 'unknown'),
     version: account.version ?? 1,
     updatedAt: account.updatedAt ?? new Date(0).toISOString(),
     riskCode: account.riskCode,
     riskSource: account.riskSource,
     riskFirstSeenAt: account.riskFirstSeenAt,
+    degradedSource: account.degradedSource,
   };
 }
 
