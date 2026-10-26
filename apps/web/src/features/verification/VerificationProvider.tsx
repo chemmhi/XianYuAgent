@@ -26,6 +26,7 @@ export function VerificationProvider({ transport, baseUrl = '', accountLabels = 
   const [selected, setSelected] = useState<string>(), [opened, setOpened] = useState(true);
   const [embedded, setEmbedded] = useState<Map<string, number>>(new Map());
   const [notice, setNotice] = useState('');
+  const [dismissedEntry, setDismissedEntry] = useState<string>(), [connecting, setConnecting] = useState(false);
   const [connectionRevision, setConnectionRevision] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false), [closeBusy, setCloseBusy] = useState(false);
   const releases = useRef(new Map<string, () => Promise<void>>());
@@ -58,6 +59,7 @@ export function VerificationProvider({ transport, baseUrl = '', accountLabels = 
   }, [applySessions]);
   useEffect(() => {
     if (!clientId) return;
+    setConnecting(true);
     let stopped = false, socket: WebSocket | undefined, reconnect: ReturnType<typeof setTimeout> | undefined;
     let focused = document.hasFocus();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -93,8 +95,13 @@ export function VerificationProvider({ transport, baseUrl = '', accountLabels = 
       if (stopped) return;
       setEnabled(true); setNotice(''); applySessions(result.sessions); connect();
     }).catch(error => {
-      if (!stopped && !(error instanceof ApiError && error.status === 404)) setNotice('验证状态暂不可用，请刷新后重试。');
-    });
+      if (stopped) return;
+      const payload = error instanceof ApiError ? error.payload as { error?: { code?: string } } | undefined : undefined;
+      if (error instanceof ApiError && (error.status === 404 || error.status === 503 && payload?.error?.code === 'VERIFICATION_DISABLED')) {
+        setEnabled(false); applySessions([]); setNotice(''); return;
+      }
+      setNotice('验证状态暂不可用，请刷新后重试。');
+    }).finally(() => { if (!stopped) setConnecting(false); });
     document.addEventListener('visibilitychange', presence);
     window.addEventListener('blur', blur); window.addEventListener('focus', focus);
     return () => { stopped = true; socket?.close(); if (reconnect) clearTimeout(reconnect); if (heartbeat) clearInterval(heartbeat); document.removeEventListener('visibilitychange', presence); window.removeEventListener('blur', blur); window.removeEventListener('focus', focus); };
@@ -137,12 +144,17 @@ export function VerificationProvider({ transport, baseUrl = '', accountLabels = 
   const releaseSession = useCallback(async (id: string) => { const release = releases.current.get(id); if (!release) throw new Error('验证连接正在恢复'); await release(); }, []);
   const value = useMemo(() => ({ enabled, api, clientId, baseUrl, sessions, update, open, retry, embedded: registerEmbedded, nextSequence, registerRelease, releaseSession }), [enabled, api, clientId, baseUrl, sessions, update, open, retry, registerEmbedded, nextSequence, registerRelease, releaseSession]);
   const active = sessions.filter(row => !terminal(row));
+  const entryKey = JSON.stringify([notice, active.map(row => row.id)]);
   const current = sessions.find(row => row.id === selected) ?? active[0];
   const isEmbedded = Boolean(current?.subject.loginSessionId && embedded.has(current.subject.loginSessionId));
   const closeHandsToSystem = current?.autoAllowed === true && current.presentationKind !== 'native_iframe';
   const label = (row: VerificationSession) => row.subject.accountId ? accountLabels[row.subject.accountId] || '闲鱼账号' : '扫码登录的闲鱼账号';
   return <Context.Provider value={value}>{children}
-    {(enabled && active.length > 0 || notice) && <div className="verification-entry card" role="status"><span>{notice || `${active.length} 个验证处理中`}</span><Button type="button" onClick={() => enabled ? open(active[0]?.id) : setConnectionRevision(value => value + 1)}>{enabled ? '查看验证' : '重试连接'}</Button></div>}
+    {(enabled && active.length > 0 || notice) && dismissedEntry !== entryKey && <div className="verification-entry card" role="status">
+      <span>{notice || `${active.length} 个验证处理中`}</span>
+      <Button type="button" disabled={connecting} onClick={() => { if (enabled) open(active[0]?.id); else { setConnecting(true); setConnectionRevision(value => value + 1); } }}>{enabled ? '查看验证' : connecting ? '连接中…' : '重试连接'}</Button>
+      <button type="button" className="icon-button" aria-label="关闭验证提示" onClick={() => setDismissedEntry(entryKey)}>×</button>
+    </div>}
     {enabled && opened && current && !isEmbedded && <VerificationDialog title={label(current)} onClose={() => current.state === 'human_active' && current.controller?.clientId === clientId ? setConfirmClose(true) : setOpened(false)}>
       {confirmClose && <div className="verification-close-confirm" role="alertdialog" aria-label="交接人工验证"><p>{closeHandsToSystem ? '交给系统后再关闭验证窗口？' : '结束本次人工验证并关闭窗口？本轮将停止。'}</p><div className="modal-actions verification-actions"><Button variant="ghost" type="button" disabled={closeBusy} onClick={() => setConfirmClose(false)}>继续人工操作</Button><Button variant="primary" type="button" disabled={closeBusy} onClick={() => {
         const release = releases.current.get(current.id); if (!release) { setNotice('正在重连，请等待控制状态更新后再交接。'); return; }

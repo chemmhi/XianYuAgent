@@ -8,6 +8,10 @@
 
 ## 固定部署入口
 
+生产远程验证默认启用：`compose.prod.yml` 将 `XIANYU_VERIFICATION_REMOTE_ENABLED` 与 `XIANYU_VERIFICATION_NATIVE_ENABLED` 默认设为 `true`，前端在线时可接管原生验证码。既有 `.env` 若显式设为 `false` 会优先于默认值；停用时可将两项设为 `false` 后通过统一入口重建。不能只确认代码或示例文件，发布后须核对 API 容器 `loadConfig()` 的实际值、已登录 `GET /api/v1/verification-sessions?active=true` 返回200，以及验证事件WebSocket收到授权快照；不得输出Cookie或候选值。worker通过API owner代理，不单独拥有验证会话。
+
+功能明确关闭时后端可能返回503/VERIFICATION_DISABLED，前端静默隐藏入口；其他503/500仍提供可关闭的错误和显式重试。关闭提示仅隐藏入口，不取消后台会话；新增轮次再次提醒。部署与账号的真实验证码放行是不同的验收项，不得在发布检查中自动提交真实挑战。
+
 生产 API 由 Nginx 反代到 `127.0.0.1:18082`，容器内部仍监听 `8080`。服务器部署目录为 `/home/ubuntu/xianyu-agent-prod`，必须显式使用 `compose.prod.yml`：
 
 ```bash

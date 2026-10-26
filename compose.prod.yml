@@ -55,6 +55,8 @@ services:
       PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
+      XIANYU_VERIFICATION_REMOTE_ENABLED: ${XIANYU_VERIFICATION_REMOTE_ENABLED:-true}
+      XIANYU_VERIFICATION_NATIVE_ENABLED: ${XIANYU_VERIFICATION_NATIVE_ENABLED:-true}
       # Use the same Google Chrome family as local verification. Do not let a
       # stale server .env switch production back to distro Chromium.
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: /usr/bin/google-chrome

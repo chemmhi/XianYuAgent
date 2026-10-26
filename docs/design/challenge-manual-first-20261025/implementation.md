@@ -128,3 +128,20 @@ Web收到clear立即撤销旧图控制但不因暂时无图误断stream；旧HTT
 提交快照实际复验：97个白名单文件从Git索引导出到独立临时目录，依赖链接只供本机执行。该目录完整API `npm --workspace apps/api test` 为456/456及所有既有smoke PASS；完整Web串行113文件561项PASS；根build PASS；原生跨层专项PASS。最后进一步去除所有realtime逐输入/stream诊断打印，保留拒绝ACK reason与close1008；同步导出后APIbuild、HTTP/WS/Chrome及native窄回归21/21 PASS。最终重跑全Web跨层时旧截图300刷新仍FAIL，native专项另行执行，不把前一失败命令称PASS。该分支只交付已验证的原生人工切片供审查，整体S3和发布门禁仍不提升。
 
 提交材料核对：索引无.env、.codex辅助文件、私有采集、HAR/NDJSON、PNG、日志或evidence JSON；追加.gitignore阻止误收。两次独立索引审核核对相对导入及脚本引用闭合、源码不含本轮临时调试采样，正式成功/失败台账保留。旧探针/调试文档及截图留工作区，不因已有本地结果整目录收进提交。
+## 生产验证入口误报修复检查卡（2026-10-26）
+
+腾讯云只读确认已部署5d8d405，运行配置remoteEnabled=false/nativeEnabled=false；app.ts在已登录请求上返回503/VERIFICATION_DISABLED。Provider仅将404视作功能不可用，故把正常禁用误报为常驻故障，且入口没有关闭按钮。用户随后明确要求生产默认启用：将生产Compose接入REMOTE/NATIVE两开关且默认true，示例配置同步为true，允许显式false；生产.env只读确认两键缺失。Web修订包括能力判定、提示关闭与显式重连：识别指定禁用错误并静默停用；真正503/500仍可见、可重试/关闭；关闭提示不取消会话，新轮次仍提醒。复用共享Button/icon-button，按用户要求启用生产功能，不修改账号或业务写动作。沿用Vitest+实际React/Chrome，新增实际HTTP client的503禁用/真实故障/重连/关闭回归，先修前FAIL，再修后验证构建与Web回归；两轮独立审核。原始调试证据不提交，回退本轮提交即可。
+
+本轮验证台账：
+
+| 尝试 | 结果与处理 |
+| --- | --- |
+| 腾讯云修前只读核验 | API实际remote/native=false，验证表存在，现有有效会话GET返回503/VERIFICATION_DISABLED；没有新建认证会话或导出凭证 |
+| 可用性首轮整套 | 因不存在关闭按钮等待而中止；改为先跑明确禁用分支，实测1 FAIL/1 PASS（禁用503错误展示，404已静默） |
+| 回归夹具修订 | 用真实HTTP client及响应处理完成标记等待，避免通过新增会话动作清除提示而掩盖问题 |
+| Compose修前/修后 | 默认开关不存在实际FAIL；加入生产environment后实际docker compose config默认true、显式false均PASS；既有compose-migration也PASS |
+| 前端修后 | 新增7项PASS；普通503不会被当作禁用；手机/桌面入口无越界、关闭按钮32×32；完整114文件574项PASS，Web build/typecheck PASS |
+| 原生跨层 | 真实React/API/隔离PG/原后端Chrome/CAS/IM专项PASS，平台受控；没有代答真实生产验证码 |
+| 独立R1/R2 | R1实际复跑7项可用性+20项Provider+Compose；R2实际配置接线、API owner/worker代理、两视口图片；均限定PASS，无新增P0–P2 |
+
+Git交付仅本轮前端、生产配置、回归及现有文档和用户要求的AGENTS.md；子分支本地提交后本地合main，再push origin main。生产.env不存在旧false，无需手改服务器配置；统一GitHub发布后须复核runtime开关与授权HTTP/WS。明确禁用的兼容修复不替代启用检查，既有30秒人工未知结果后新context自动接续仍未实现。

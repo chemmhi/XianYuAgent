@@ -36,6 +36,8 @@
 .verification-results li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
 .verification-results small { flex-basis: 100%; color: var(--sub); }
 .verification-entry { position: fixed; right: 24px; bottom: 24px; z-index: 34; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px); padding: 14px 16px; color: var(--text); font-size: 12px; }
+.verification-entry > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.verification-entry > button { flex: 0 0 auto; }
 .verification-queue { display: flex; gap: 8px; overflow: auto; margin-bottom: 14px; }
 .verification-queue button { white-space: nowrap; }
 .verification-queue button[aria-current=true] { border-color: var(--link); color: var(--link); }

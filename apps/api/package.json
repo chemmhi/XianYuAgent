@@ -17,7 +17,7 @@
     "test:xianyu-system-reconcile:postgres": "npm run build && node scripts/xianyu-system-message-reconcile-postgres-smoke.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "test:product-knowledge-base": "npm run build && node scripts/product-knowledge-base-api-smoke.mjs",
-    "test:compose-migration": "node scripts/compose-migration-config.test.mjs",
+    "test:compose-migration": "node scripts/compose-migration-config.test.mjs && node --test scripts/verification-production-config.test.mjs",
     "test:postgres:credentials": "npm run build && node scripts/credential-store-postgres-smoke.mjs",
     "test:postgres:openai": "npm run build && node scripts/openai-settings-postgres-smoke.mjs",
     "test:dashboard": "node --import tsx --test scripts/dashboard-service.test.ts",
