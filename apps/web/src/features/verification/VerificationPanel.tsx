@@ -6,6 +6,7 @@ import { Button } from '../../shared/ui/Button';
 import { ApiError } from '../../api/http';
 import { NativeVerificationPanel } from './NativeVerificationPanel';
 import { VerificationOutcome, VerificationSourceResults } from './VerificationOutcome';
+import { VerificationProgress } from './VerificationProgress';
 
 export function VerificationPanel({ session, onDismiss }: { session: VerificationSession; onDismiss?: () => void }) {
   return session.presentationKind === 'native_iframe' ? <NativeVerificationPanel session={session} onDismiss={onDismiss} /> : <RemoteVerificationPanel session={session} onDismiss={onDismiss} />;
@@ -127,7 +128,7 @@ function RemoteVerificationPanel({ session, onDismiss }: { session: Verification
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up}
         style={{ width: `min(${stream.frame.width}px, 100%, calc(var(--verification-image-height) * ${stream.frame.width / stream.frame.height}))`,
           aspectRatio: `${stream.frame.width}/${stream.frame.height}`, touchAction: controllable ? 'none' : 'auto' }} />
-        : <div className="verification-image-placeholder" role="status">{['auto_active', 'handoff', 'rechecking', 'settling'].includes(session.state) ? '正在处理验证结果…' : '正在连接原会话画面…'}</div>}
+        : <VerificationProgress title={['auto_active', 'handoff', 'rechecking', 'settling'].includes(session.state) ? '正在处理验证结果…' : '正在连接原会话画面…'} description="页面就绪后会自动更新，请稍候。" />}
       {!finished && stream.frame && !fresh && <span className="verification-stale">画面更新中，暂不可操作</span>}
     </div>
     {(error || stream.error) && !finished && <p className="verification-error" role="alert">{error || stream.error}</p>}

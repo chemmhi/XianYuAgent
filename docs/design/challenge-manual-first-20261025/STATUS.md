@@ -1,5 +1,13 @@
 # 人工优先挑战实施状态
 
+## 2026-10-26 当前切片：中间态 v0.9 / 原生直接呈现
+
+- 前次只修终态遗漏中间态，本轮补齐准备、他页控制、自动、候选等待及复验的居中图标/标题/说明和底部区域，固定540px、完整420×320原生内容、共享按钮规范不变。原生不再要求点击“我来操作”，实际可见/聚焦并取得租约后自动claim一次；丢响应重载复用原version/deadline，隐藏迟到授权取消，保留30秒服务端截止。
+- 中间态修前两项FAIL；修后原生组件19/19实际React/Chrome PASS（含桌面/手机持续越过轨道与iframe边沿、同Document/续租/原deadline/0取消保护），build/typecheck PASS。更早完整Web114文件578项及原生受控跨层专项PASS。两轮独立架构与视觉限定PASS，他页指代P2修正后两视口复审关闭。最终全量与发布结果追加到implementation.md，不把待执行检查记PASS。
+- 最终当前源码：完整Web114文件580/580 PASS（70.50s）、Web build/typecheck PASS、原生真实UI/API/隔离PG/后端Chrome/Token身份CAS/IM专项再次PASS。受控平台结果不代替真实平台放行；真实两轮证据单独记录。
+- 真实Chrome这次两段均录全：失败1681ms/越轨道15px/slide8778；成功566ms/越轨道32px/slide0且Token SUCCESS，手柄均钳制258px。这排除“只要越过轨道便失败”的推断，不证明8778具体原因或自动成功率。此前错误frame采集、IAB第二段漏采及授权Agent那轮未证明通过均保留，详见implementation.md。
+- Git仍按子分支提交→本地main合并→push origin main；只收代码、测试与既有正式文档，原始采集/凭证/临时探针不提交。生产此前已部署1f9f7fa，remote/native实际启用，授权HTTP200与WS快照已验证；当前切片尚未发布。整体S3仍有人工未知结果后自动新context接续、旧截图300刷新缺口，不因UI与单轮成功关闭。
+
 ## 2026-10-26 生产默认启用与入口误报修复
 
 - 用户明确要求生产默认启用：生产Compose接入REMOTE/NATIVE两开关，默认true，示例同true，保留显式false。生产修前实际配置false/false，既有.env两键缺失；授权接口实测503/VERIFICATION_DISABLED，验证表已存在。

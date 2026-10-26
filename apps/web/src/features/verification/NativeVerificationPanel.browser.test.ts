@@ -18,7 +18,8 @@ const actualNow=Date.now.bind(Date);let offset=0;Date.now=()=>actualNow()+offset
 const embedded=new URLSearchParams(location.search).has('qr');
 const sockets=new Set();let row=session({id:'native-review',subject:embedded?{loginSessionId:'qr-review'}:{accountId:'account'},presentationKind:'native_iframe',state:'priority_wait',
  serverTime:Date.now(),createdAt:Date.now(),expiresAt:Date.now()+300000,setupDeadline:Date.now()+8000,priorityDeadline:Date.now()+60000});
-let renewals=0,claims=0,cancels=0,results=0,streams=0,retries=0,heldClaim,renewMode='normal',holdClaim=false,rejectRetry=false;
+let renewals=0,claims=0,cancels=0,results=0,streams=0,retries=0,heldClaim,renewMode='normal',holdClaim=!new URLSearchParams(location.search).has('lost'),rejectRetry=false;
+let loseReply=new URLSearchParams(location.search).has('lost'),claimVersion;const claimVersions=[];
 const leaseId='native-review-lease',origin='https://h5api.m.goofish.com';
 const url=origin+'/h5/mtop.review.read/1.0/_____tmd_____/punish?synthetic-only=1&addCookieToHeader=1';
 const copy=()=>structuredClone(row);
@@ -35,10 +36,13 @@ const native=async(action,body)=>{
   return{session:copy(),leaseId};
  }
  if(action==='claim'){
-  claims++;row={...row,state:'human_active',controller:{clientId:body.clientInstanceId},controlEpoch:row.controlEpoch+1,
+  claims++;claimVersions.push(body.expectedVersion);
+  if(row.state==='human_active'&&claimVersion!==body.expectedVersion)throw Error('claim replay version changed');
+  if(row.state!=='human_active'){claimVersion=body.expectedVersion;row={...row,state:'human_active',controller:{clientId:body.clientInstanceId},controlEpoch:row.controlEpoch+1,
    humanDeadline:Date.now()+30000,presentation:{clientId:body.clientInstanceId,until:Date.now()+4000},
-   version:row.version+1,eventSequence:row.eventSequence+1,serverTime:Date.now()};
+   version:row.version+1,eventSequence:row.eventSequence+1,serverTime:Date.now()};}
   const result={session:copy(),leaseId,url,origin};
+  if(loseReply){loseReply=false;throw Error('controlled lost claim response');}
   if(holdClaim)return new Promise(resolve=>{heldClaim=()=>resolve(result);});return result;
  }
  if(action==='cancel'){
@@ -63,7 +67,8 @@ document.addEventListener('native-review-command',()=>{
  else if(command.type==='advanceAndRenew'){offset+=command.ms;publish({presentation:{...row.presentation,until:Date.now()+4000}});}
  else if(command.type==='state')publish({state:command.value,failureCode:command.failureCode,controller:undefined,presentation:undefined});
  else if(command.type==='rejectRetry')rejectRetry=true;
- document.documentElement.setAttribute('data-native-review-stats',JSON.stringify({renewals,claims,cancels,results,streams,retries,state:row.state}));
+ else if(command.type==='otherHuman')publish({state:'human_active',controller:{clientId:'another-client'},humanDeadline:Date.now()+30000,presentation:undefined});
+ document.documentElement.setAttribute('data-native-review-stats',JSON.stringify({renewals,claims,cancels,results,streams,retries,claimVersions,humanDeadline:row.humanDeadline,state:row.state}));
 });
 createRoot(document.getElementById('root')).render(React.createElement(VerificationProvider,{transport,accountLabels:{account:'原生测试账号'}},embedded?React.createElement('section',{'data-testid':'qr-host'},React.createElement(VerificationQrPanel,{loginSessionId:'qr-review'})):null));
 `;
@@ -94,11 +99,11 @@ afterAll(async () => {
   }
 });
 
-async function pageFor(viewport = { width: 1440, height: 900 }, query = ''): Promise<Page> {
+async function pageFor(viewport = { width: 1440, height: 900 }, query = '', platform = platformHtml): Promise<Page> {
   const page = await browser!.newPage({ viewport });
-  await page.route('https://h5api.m.goofish.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: platformHtml }));
+  await page.route('https://h5api.m.goofish.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: platform }));
   await page.goto(`${baseUrl}__native-panel-review.html${query}`); await page.bringToFront();
-  await expect.poll(() => page.getByRole('button', { name: '我来操作', exact: true }).isEnabled()).toBe(true);
+  await expect.poll(async () => (await stats(page)).claims).toBe(1);
   return page;
 }
 async function control(page: Page, command: Record<string, unknown>) {
@@ -110,10 +115,61 @@ async function control(page: Page, command: Record<string, unknown>) {
 }
 async function stats(page: Page) { return control(page, { type: 'stats' }); }
 async function claim(page: Page) {
-  await page.getByRole('button', { name: '我来操作', exact: true }).click();
+  await control(page, { type: 'finishClaim' });
   await page.locator('iframe[title="闲鱼原生安全验证"]').waitFor();
   await page.frameLocator('iframe').locator('#end').waitFor();
 }
+
+it('opens native verification automatically once and cancels a grant returned after the panel became hidden', async () => {
+  const page = await pageFor();
+  try {
+    expect(await page.getByRole('button', { name: '我来操作', exact: true }).count()).toBe(0);
+    expect((await stats(page)).claims).toBe(1);
+    await page.locator('.verification-modal').evaluate(element => { (element as HTMLElement).style.visibility = 'hidden'; });
+    await control(page, { type: 'finishClaim' });
+    await expect.poll(async () => (await stats(page)).cancels).toBe(1);
+    expect(await page.locator('iframe').count()).toBe(0);
+  } finally { await page.close(); }
+}, 30_000);
+
+it('reloads a lost automatic claim response with the original version and deadline', async () => {
+  const page = await pageFor(undefined, '?lost=1');
+  try {
+    await page.getByRole('button', { name: '重新加载验证', exact: true }).waitFor();
+    const before = await stats(page);
+    await page.getByRole('button', { name: '重新加载验证', exact: true }).click();
+    await page.locator('iframe').waitFor();
+    const after = await stats(page);
+    expect(after.claims).toBe(2); expect(after.claimVersions[1]).toBe(after.claimVersions[0]);
+    expect(after.humanDeadline).toBe(before.humanDeadline);
+  } finally { await page.close(); }
+}, 30_000);
+
+it.each([{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }])(
+  'centers all native intermediate states in the fixed $name dialog and keeps the action at the bottom', async viewport => {
+    const page = await pageFor(viewport);
+    try {
+      for (const state of ['priority_wait', 'preparing', 'auto_active', 'settling', 'handoff', 'rechecking', 'human_active']) {
+        if (state === 'human_active') await control(page, { type: 'otherHuman' });
+        else await control(page, { type: 'state', value: state });
+        await page.locator(`[data-state="${state}"]`).waitFor();
+        const view = await page.locator('.verification-modal').evaluate(element => {
+          const body = element.querySelector('.verification-modal-body')!, area = element.querySelector('.verification-image')!;
+          const copy = area.querySelector('.verification-progress-copy'), footer = element.querySelector('.verification-footer')!;
+          const a = area.getBoundingClientRect(), c = copy?.getBoundingClientRect(), f = footer.getBoundingClientRect();
+          return { height: element.getBoundingClientRect().height, overflow: body.scrollHeight-body.clientHeight,
+            title: copy?.querySelector('h3')?.textContent, centered: c ? Math.abs((c.top+c.bottom-a.top-a.bottom)/2) : null,
+            footerGap: body.getBoundingClientRect().bottom-f.bottom, text: body.textContent };
+        });
+        expect(view.title).toBeTruthy(); expect(view.height).toBe(540); expect(view.overflow).toBe(0);
+        expect(view.centered).not.toBeNull(); expect(view.centered!).toBeLessThan(2); expect(view.footerGap).toBeLessThan(2);
+        if (state === 'priority_wait') expect(await page.getByRole('button', { name: '我来操作', exact: true }).count()).toBe(0);
+        if (state === 'human_active') { expect(view.text).toContain('请等待其他页面完成验证，结果会自动同步。'); expect(view.text).not.toContain('由你操作验证'); }
+        await page.screenshot({ path: join(tmpdir(), `xianyu-verification-progress-${viewport.name}-${state}.png`) });
+      }
+      expect((await stats(page)).claims).toBe(1); expect((await stats(page)).results).toBe(0);
+    } finally { await page.close(); }
+  }, 30_000);
 
 it.each([{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }])(
   'balances terminal results and closes success without retrying on $name', async viewport => {
@@ -149,7 +205,8 @@ it('retries a failed outcome through the existing manual-only retry and opens th
     await page.getByRole('button', { name: '我来重试', exact: true }).click();
     await page.locator('[data-state="priority_wait"]').waitFor();
     expect((await stats(page)).retries).toBe(1);
-    expect(await page.getByRole('button', { name: '我来操作', exact: true }).isVisible()).toBe(true);
+    await expect.poll(async () => (await stats(page)).claims).toBe(2);
+    expect(await page.getByRole('button', { name: '我来操作', exact: true }).count()).toBe(0);
   } finally { await page.close(); }
 }, 30_000);
 
@@ -193,6 +250,7 @@ it('removes the native iframe at the local human deadline even when its presenta
     await page.locator('iframe').waitFor({ state: 'detached' });
     expect((await stats(page)).results).toBe(0);
     expect((await stats(page)).streams).toBe(0);
+    expect((await stats(page)).claims).toBe(1);
   } finally { await page.close(); }
 }, 30_000);
 
@@ -211,7 +269,6 @@ it('cancels a claim granted after its panel was closed and never resurrects the 
   const page = await pageFor();
   try {
     await control(page, { type: 'holdClaim' });
-    await page.getByRole('button', { name: '我来操作', exact: true }).click();
     await expect.poll(async () => (await stats(page)).claims).toBe(1);
     await page.getByRole('button', { name: '收起验证弹窗', exact: true }).click();
     await page.locator('.verification-modal').waitFor({ state: 'detached' });
@@ -237,6 +294,40 @@ it('renews native presence without replacing or navigating the active iframe and
     expect((await stats(page)).streams).toBe(0);
   } finally { await page.close(); }
 }, 30_000);
+
+it.each([{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }])(
+  'keeps native control and the same iframe while the mouse crosses the track and iframe edge on $name', async viewport => {
+    // A controlled platform owns its input and clamps its handle. The project
+    // must not intercept overshoot, judge an answer, or tear down that document.
+    const platform = platformHtml + `<style>#handle{position:absolute;left:0;top:0;width:42px;height:30px;background:#48c;user-select:none}</style>
+      <script>const track=document.getElementById('track'),handle=document.createElement('span');handle.id='handle';track.append(handle);
+      let pressed=false,start=0;
+      handle.addEventListener('mousedown',e=>{pressed=true;start=e.clientX-(parseFloat(handle.style.left)||0);});
+      document.addEventListener('mousemove',e=>{if(pressed)handle.style.left=Math.min(258,Math.max(-2,e.clientX-start))+'px';});
+      document.addEventListener('mouseup',()=>{pressed=false;});</script>`;
+    const page = await pageFor(viewport, '', platform);
+    try {
+      await claim(page);
+      const frame = page.frames().find(value => value.url().startsWith('https://h5api.m.goofish.com/'))!;
+      await frame.locator('#handle').waitFor();
+      await frame.evaluate(() => document.documentElement.setAttribute('data-native-sentinel', 'held-document'));
+      await page.locator('iframe').evaluate(element => element.setAttribute('data-native-element', 'held-element'));
+      const box = (await page.locator('iframe').boundingBox())!, scale = box.width / 420;
+      const before = await stats(page), y = box.y + 210 * scale;
+      await page.mouse.move(box.x + 81 * scale, y); await page.mouse.down();
+      await page.mouse.move(box.x + 380 * scale, y, { steps: 12 });
+      expect(await frame.locator('#handle').evaluate(element => (element as HTMLElement).style.left)).toBe('258px');
+      await page.mouse.move(box.x + 460 * scale, y, { steps: 6 });
+      await expect.poll(async () => (await stats(page)).renewals, { timeout: 4_000 }).toBeGreaterThanOrEqual(before.renewals + 2);
+      await page.mouse.up();
+      const after = await stats(page);
+      expect(after.state).toBe('human_active'); expect(after.humanDeadline).toBe(before.humanDeadline);
+      expect(after.claims).toBe(1); expect(after.cancels).toBe(0); expect(after.results).toBe(0); expect(after.streams).toBe(0);
+      expect(await page.locator('iframe').getAttribute('data-native-element')).toBe('held-element');
+      expect(await frame.evaluate(() => document.documentElement.getAttribute('data-native-sentinel'))).toBe('held-document');
+      expect(await frame.locator('#handle').evaluate(element => (element as HTMLElement).style.left)).toBe('258px');
+    } finally { await page.close(); }
+  }, 30_000);
 
 it('describes native close as ending this human round and cancels it instead of promising automatic handover', async () => {
   const page = await pageFor();

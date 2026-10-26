@@ -40,9 +40,9 @@ try {
     throw new Error(`Timed out: ${label}\n${(await page.locator('body').innerText()).slice(-1800)}`);
   };
   await page.goto(`${webUrl}/accounts`); await page.bringToFront();
+  const beforeClaim = Date.now();
   await page.getByRole('button', { name: '我来重试', exact: true }).click();
-  const panel = page.getByTestId('verification-panel'), claim = panel.getByRole('button', { name: '我来操作', exact: true });
-  await wait(() => claim.isEnabled().catch(() => false), Boolean, 'native presentation lease');
+  const panel = page.getByTestId('verification-panel');
   const row = await wait(async () => (await fixture.runtime.verification.coordinator.repository.list()).find(s => s.subject.accountId === fixture.account.id), Boolean, 'persisted verification');
   assert.equal(row.presentationKind, 'native_iframe');
   assert.equal(row.mode, 'manual_only');
@@ -53,7 +53,7 @@ try {
   assert.equal((await post({}, false)).status, 401);
   assert.equal((await post({}, true, false)).status, 403);
   assert.equal((await post({ clientInstanceId: 'bad', challengeGeneration: 1 })).status, 422);
-  const beforeClaim = Date.now(); await claim.click();
+  assert.equal(await panel.getByRole('button', { name: '我来操作', exact: true }).count(), 0, 'native verification must open without a second confirmation');
   const frameElement = page.locator('iframe[title="闲鱼原生安全验证"]'); await frameElement.waitFor();
   const controlled = await fixture.runtime.verification.coordinator.repository.get(row.id);
   assert.ok(controlled.humanDeadline >= beforeClaim + 30_000 && controlled.humanDeadline <= Date.now() + 30_000);

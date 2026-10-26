@@ -4,6 +4,8 @@ import { useVerification } from './VerificationProvider';
 import { countdown, panelVisible, stateLabel, terminal, type VerificationSession } from './model';
 import { nativeCandidateMessage } from './native-message';
 import { VerificationOutcome } from './VerificationOutcome';
+import { VerificationProgress } from './VerificationProgress';
+import { ApiError } from '../../api/http';
 
 interface Presentation { url: string; origin: string; leaseId: string; epoch: number; generation: number }
 
@@ -12,6 +14,10 @@ export function NativeVerificationPanel({ session, onDismiss }: { session: Verif
   const latest = useRef(session); latest.current = session;
   const lease = useRef<string | undefined>(undefined), submitting = useRef(false);
   const lifecycle = useRef(0);
+  const automaticClaim = useRef<string | undefined>(undefined);
+  const claimInFlight = useRef(false);
+  const presentationVersion = useRef(0);
+  const claimIntent = useRef<{ key: string; version: number } | undefined>(undefined);
   const [presentation, setPresentation] = useState<Presentation>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [scale, setScale] = useState(1);
   const [now, setNow] = useState(session.serverTime), clock = useRef({ local: Date.now(), server: session.serverTime });
@@ -21,7 +27,7 @@ export function NativeVerificationPanel({ session, onDismiss }: { session: Verif
   const live = (current: VerificationSession, at: number) => current.state === 'human_active'
     && current.controller?.clientId === clientId && at < (current.humanDeadline ?? 0) && at < current.expiresAt
     && current.presentation?.clientId === clientId && at < (current.presentation?.until ?? 0);
-  useEffect(() => { lifecycle.current++; return () => { lifecycle.current++; }; }, [session.id, session.challengeGeneration]);
+  useEffect(() => { lifecycle.current++; claimInFlight.current = false; setBusy(false); return () => { lifecycle.current++; }; }, [session.id, session.challengeGeneration]);
   useEffect(() => {
     const element = surface.current; if (!element) return;
     const fit = () => setScale(Math.max(0, Math.min(1, element.clientWidth / 420, element.clientHeight / 320)));
@@ -40,7 +46,7 @@ export function NativeVerificationPanel({ session, onDismiss }: { session: Verif
       pending = true;
       try {
         const result = await api.native(session.id, 'presentation', { clientInstanceId: clientId, challengeGeneration: latest.current.challengeGeneration });
-        if (!stopped) { lease.current = result.leaseId; update(result.session); }
+        if (!stopped) { lease.current = result.leaseId; presentationVersion.current = result.session.version; update(result.session); }
       } catch { if (!stopped) setError('验证状态正在更新，请稍后重试。'); }
       finally { pending = false; }
     };
@@ -81,17 +87,20 @@ export function NativeVerificationPanel({ session, onDismiss }: { session: Verif
   const visible = live(session, now) && presentation?.generation === session.challengeGeneration && presentation.epoch === session.controlEpoch;
   const finished = terminal(session), seconds = countdown(session, now);
   const claim = async () => {
-    if (!api || !clientId || !update || !lease.current || busy || !panelVisible(surface.current)) return;
+    if (!api || !clientId || !update || !lease.current || claimInFlight.current || busy || !panelVisible(surface.current)) return;
+    claimInFlight.current = true;
     setBusy(true); setError('');
     const revision = lifecycle.current;
     try {
       const current = latest.current;
+      const key = `${current.id}:${current.challengeGeneration}:${lease.current}`;
+      if (claimIntent.current?.key !== key) claimIntent.current = { key, version: Math.max(current.version, presentationVersion.current) };
       const result = await api.native(current.id, 'claim', { clientInstanceId: clientId, leaseId: lease.current,
-        challengeGeneration: current.challengeGeneration, expectedVersion: current.version });
+        challengeGeneration: current.challengeGeneration, expectedVersion: claimIntent.current.version });
       if (revision !== lifecycle.current || latest.current.challengeGeneration !== result.session.challengeGeneration
         || latest.current.eventSequence > result.session.eventSequence && (latest.current.state !== 'human_active'
           || latest.current.controlEpoch !== result.session.controlEpoch || latest.current.controller?.clientId !== clientId)
-        || !live(result.session, clockNow())) {
+        || !live(result.session, clockNow()) || !panelVisible(surface.current)) {
         if (result.leaseId) await api.native(current.id, 'cancel', { clientInstanceId: clientId, leaseId: result.leaseId,
           challengeGeneration: result.session.challengeGeneration, controlEpoch: result.session.controlEpoch }).catch(() => undefined);
         return;
@@ -99,28 +108,43 @@ export function NativeVerificationPanel({ session, onDismiss }: { session: Verif
       update(result.session);
       if (result.url && result.origin && result.leaseId) setPresentation({ url: result.url, origin: result.origin,
         leaseId: result.leaseId, generation: result.session.challengeGeneration, epoch: result.session.controlEpoch });
-    } catch { setError('状态已更新，请再次点击“我来操作”。'); void api.get(session.id).then(update).catch(() => undefined); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      if (revision !== lifecycle.current) return;
+      if (cause instanceof ApiError && (cause.payload as { error?: { code?: string } } | undefined)?.error?.code === 'VERIFICATION_VERSION_CHANGED') claimIntent.current = undefined;
+      setError('验证页面未能加载，请重新加载验证。'); void api.get(session.id).then(update).catch(() => undefined);
+    }
+    finally { if (revision === lifecycle.current) { claimInFlight.current = false; setBusy(false); } }
   };
+  useEffect(() => {
+    const key = `${session.id}:${session.challengeGeneration}`;
+    if (session.state !== 'priority_wait' || !lease.current || busy || automaticClaim.current === key || !panelVisible(surface.current)) return;
+    automaticClaim.current = key;
+    void claim();
+  });
+  const checking = ['settling', 'handoff', 'rechecking'].includes(session.state);
+  const otherHuman = session.state === 'human_active' && !mine;
+  const progress = checking ? { title: '正在确认账号状态', description: '正在复验原会话，请稍候。' }
+    : otherHuman ? { title: '其他页面正在验证', description: '请等待其他页面完成验证，结果会自动同步。' }
+    : session.state === 'auto_active' ? { title: '系统正在处理验证', description: '正在等待处理结果，请稍候。' }
+    : mine ? { title: '正在等待验证结果', description: '正在加载验证页面或等待平台返回结果。' }
+    : { title: '正在加载原生验证', description: '验证页面就绪后，可直接拖动滑块。' };
   if (finished) return <VerificationOutcome session={session} onDismiss={onDismiss} />;
   return <section className="verification-panel" data-testid="verification-panel" data-state={session.state} aria-label="闲鱼验证操作区">
-    <div className="verification-summary"><p className="verification-state" role="status"><strong>{['settling', 'handoff', 'rechecking'].includes(session.state)
-      ? '正在复验账号连接' : stateLabel(session.state)}</strong>{['priority_wait', 'human_active'].includes(session.state) && <span className="verification-countdown" aria-label={`剩余 ${seconds} 秒`}>{seconds}s</span>}</p>
-      {session.state === 'priority_wait' && <p>点击“我来操作”后，请在 30 秒内完成验证。</p>}
+    <div className="verification-summary"><p className="verification-state" role="status"><strong>{checking ? '正在复验账号连接'
+      : otherHuman ? '等待当前操作完成' : session.state === 'priority_wait' ? '正在准备人工验证' : stateLabel(session.state)}</strong>{session.state === 'human_active' && <span className="verification-countdown" aria-label={`剩余 ${seconds} 秒`}>{seconds}s</span>}</p>
     </div>
     <div ref={surface} className="verification-image">
       {visible ? <iframe key={`${session.id}:${presentation.leaseId}:${presentation.generation}:${presentation.epoch}`} ref={iframe}
         src={presentation.url} title="闲鱼原生安全验证" width="420" height="320" className="verification-native-frame"
         style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
         sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="strict-origin-when-cross-origin" />
-        : <div className="verification-result" role="status">{session.state === 'auto_active' ? '系统正在尝试验证…' : mine ? '正在等待验证结果…' : ['settling', 'handoff', 'rechecking'].includes(session.state)
-            ? '正在检查原会话，请勿重复提交。' : '等待你接管验证'}</div>}
+        : <VerificationProgress {...progress} />}
     </div>
     {error && <p className="verification-error" role="alert">{error}</p>}
     <footer className="verification-footer">
-      <p className="verification-footnote">请在当前窗口完成验证。</p>
+      <p className="verification-footnote">{mine ? '请在剩余时间内完成滑动验证。' : otherHuman ? '此页面可查看验证进度。' : checking || session.state === 'auto_active' ? '结果确认后会自动更新。' : '请保持窗口打开，验证页面将自动显示。'}</p>
       <div className="modal-actions verification-actions">
-        {session.state === 'priority_wait' && <Button type="button" variant="primary" disabled={busy || !lease.current || seconds === 0} onClick={() => void claim()}>我来操作</Button>}
+        {(session.state === 'priority_wait' || mine && !visible) && error && <Button type="button" variant="primary" disabled={busy || !lease.current || seconds === 0} onClick={() => void claim()}>重新加载验证</Button>}
       </div>
     </footer>
   </section>;

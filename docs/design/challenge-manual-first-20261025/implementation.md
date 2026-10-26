@@ -1,5 +1,35 @@
 # 人工优先挑战实施记录
 
+## 验证中间态布局补齐检查卡（2026-10-26）
+
+用户指出接管前截图仍是左侧孤立文字与大块空白，前次只修终态遗漏中间态，并否定二次确认流程。范围：Native/Remote无画面时共享居中状态图标、标题和说明；原生页在可见、聚焦、取得presentation租约后自动claim，一代只自动尝试一次，移除“我来操作”和5秒确认倒计时。30秒仍由服务端授权起算，不因重新加载或续租延长。真实420×320 iframe、候选协议及后端仲裁不改，固定540px不变。沿用既有Button/主题/间距，不重绘验证码。按AGENTS子分支本地提交→本地合main→push交付，回滚本次原子提交即可。
+
+| 本轮尝试 | 结果与证据边界 |
+| --- | --- |
+| 中间态桌面/手机新增布局回归 | 修前2 FAIL，缺少居中的状态内容，修后PASS |
+| 直接原生呈现 | 同步in-flight防重；claim使用最新presentation版本；丢响应后重新加载复用原version/deadline；迟到grant重新核对可见性并取消；generation/lifecycle隔离旧finally |
+| 完整Web与构建（新增越界回归前） | 114文件578项PASS，build/typecheck PASS；原生真实UI/API/隔离PG/后端Chrome/Token身份CAS/IM专项PASS，平台受控 |
+| 独立架构复审 | 实际React/Chrome17/17 PASS；检查最终授权、版本、原截止及候选链，限定无P0–P2；新代旧finally仅静态复核 |
+| 独立视觉复审 | 14张中间态与2张原生截图；他页控制说明误指“当前页面”的P2修正，并复查桌面/手机新截图关闭；固定540、底部操作、正常屏无多余滚动通过 |
+| 永久越界浏览器回归 | 桌面/手机真实鼠标连续移至track.right+20再到iframe.right+40，手柄由受控平台钳制258px；续租继续、原deadline不变、同iframe/Document、0取消/结果/图流；组件19/19 PASS，build PASS。只验证项目不拦截/撤销，不证明平台接受答案 |
+
+最终实际门禁：`npm --workspace apps/web exec -- vitest run --fileParallelism=false` 为114文件580/580 PASS（70.50s）；`npm --workspace apps/web run build` 含类型检查PASS；`npm --workspace apps/web run test:e2e:verification:native` 在隔离PostgreSQL实际PASS，覆盖自动显示无需二次确认、真实原生DOM鼠标移动、候选交接、原业务Token/身份/CAS与匹配IM心跳、成功关闭不创建新轮次。API/数据库源码未改，不另以全量API重跑代替本次Web与跨层行为验证。新增越界回归及台账再经架构只读复审限定PASS，独立视觉P2已关闭。Git提交仅本轮白名单，原始采集与历史未跟踪文档保留工作区，不混入main。
+
+### 原生拖动边界实测与失败保留（2026-10-26）
+
+用户报告越过轨道终点被判失败，要求对照原生页面。当前native路径由平台iframe自己处理输入，不经过项目坐标转发或ROI判定；旧截图路径和Ydisks后台自动路径分别核查，不能把三个路径的失败混作同因。独立受控Chrome实验覆盖原生基线、项目桌面、项目手机，各自连续越界与一步跳出，共6/6：连续移动时手柄钳制258px，项目续租不中断且不取消；一步跳出iframe时三种容器都收不到子document的中间move，不能归为项目独有。后台自动使用直接page.mouse，与旧图流输入围栏不同；其轨迹规划已有越过目标的点，尚无证据证明它因同一问题失败，不修改平台SDK或凭空加一次自动作答。
+
+| 真实尝试/采集 | 实际结果及缺口 |
+| --- | --- |
+| Agent获当次授权的Chrome越界拖动 | 一次真实提交；HTTP200后新挑战，没有可读取的slide正文，不能认定通过。正文读取被工具的暂停文档保护拒绝，没有绕过 |
+| 用户Chrome首轮轨迹探针 | 误接隐藏g.alicdn资源frame，0轨迹；用户报告通过但不能据此分析手势，失败采集保留 |
+| 用户IAB两次拖动 | 第一段95事件、1895ms、鼠标x378/轨道right360/手柄left258；对应slide8778，Token仍要求验证。第二次slide0、Token SUCCESS，context重建导致第二段漏采。用户明确确认“先失败，又拖了一次”，绝不把第一段标成功 |
+| 新Chrome探针准备 | Page.addScriptToEvaluateOnNewDocument明确不支持；改为监听实际default context及origin，注入被动监听，逐事件JSON字符串后备与本地落盘。父页每次核对当前iframe.source/origin，按docId/gesture分代。用户在重试后等待新context137与实际手柄自检通过，未把自动发现宣称为零缺口 |
+| 新Chrome第一次，用户报告失败 | 完整98事件（49个pointer事件，兼容mouse另计），pointerdown/up都在，1681ms；鼠标最远x375，即轨道外15px但仍在420px iframe内，手柄left258。slide8778/success=true；松手前约642ms已经提交，report的code0不是验证成功 |
+| 新Chrome第二次，用户报告通过 | 新context完整42事件（21个pointer事件），566ms；鼠标最远x392，即轨道外32px、仍在iframe内，手柄钳制258。slide0/success=true，在松手前约76ms提交，之后login.token SUCCESS。两段均真实isTrusted输入，本次相关正文无缺失；凭证/原请求仅本地保存 |
+
+结论限于实测：原生允许鼠标超过轨道终点，手柄停在终点；成功轮的越界量反而更大，不能将“鼠标越界”直接等同失败。code8778的具体原因及后台自动成功率仍未知，快慢两轮也不足以认定速度是因果。真实两轮未跨iframe外沿；跨iframe外沿仅由受控对照证明项目不撤销。微任务几何不保证处于全部SDK回调之后，不用单个采样断言SDK内部顺序。探针已从存活父页和验证码context移除，未改平台样式、事件传播或指针捕获。原始档案为本机私有会话2026-10-26T13-26-33-857Z-b3a3ee2f；原始NDJSON/JSON、截图、凭证和调试代码均不进Git。
+
 2026-10-26：用户批准按方案实施，将人工窗口改为30秒，要求代码完成后独立Agent审核。授权本地编码与测试，不包含部署。
 
 ## 修改前检查
