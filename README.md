@@ -199,9 +199,8 @@ API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=re
 
 - `AUTO_REPLY_REPAIR_MODE=enforce`：启用修复后的自动回复主链路。
 - `AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED=true`：启用发送结果审核 Worker。
-- `INBOUND_QUARANTINE_CLEANUP_ENABLED=true`：启用入站 quarantine 分批过期清理。
-- `INBOUND_QUARANTINE_RETENTION_DAYS=7`：已解决和未解决 quarantine 统一按该窗口保留；quarantine 仅保留摘要/预览，不作为无限期重放队列。
-- `INBOUND_QUARANTINE_CLEANUP_BATCH_SIZE=10000`、`INBOUND_QUARANTINE_CLEANUP_POLL_MS=300000`：控制每批删除量和轮询间隔。
+- 入站 quarantine 与审计记录统一固定保留最近 72 小时，Worker 自动分批删除过期记录；关键审计在窗口内逐条保留。旧 `INBOUND_QUARANTINE_*` 不再控制保留期或清理开关。
+- `RECORD_CLEANUP_BATCH_SIZE=10000`、`RECORD_CLEANUP_POLL_MS=60000`：控制每批删除量和轮询间隔，每表每轮最多 20 批或 15 秒。普通跳过事件和相同系统消息按小时合并计数，详见 [记录保留与清理](docs/operations/record-retention.md)。
 - `AUTO_REPLY_MODEL_ENABLED=true`：允许使用配置的模型生成回复；仍受 `API_KEY`、`BASE_URL`、`MODEL` 等配置约束。
 - `AUTO_REPLY_SEND_MODE=live`：允许真实发送；排障或演练时可切换为 `simulate`。
 - `AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT=true`：账号没有持久化策略时，API 启动自动写入版本化默认策略。

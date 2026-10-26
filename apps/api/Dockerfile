@@ -35,6 +35,7 @@ RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod 755 ./docker-entrypoint.sh
 COPY scripts/migrate.mjs ./scripts/migrate.mjs
 COPY scripts/verify-delivery-cutover.mjs ./scripts/verify-delivery-cutover.mjs
 COPY scripts/purge-deleted-account.mjs ./scripts/purge-deleted-account.mjs
+COPY scripts/cleanup-retained-records.mjs ./scripts/cleanup-retained-records.mjs
 COPY migrations ./migrations
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

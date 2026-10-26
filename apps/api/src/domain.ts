@@ -742,6 +742,8 @@ export interface InboundQuarantineRecord {
   receivedAt: string;
   resolvedAt?: string;
   createdAt: string;
+  occurrenceCount?: number;
+  lastSeenAt?: string;
 }
 
 export type AutoReplyDecision = 'replied' | 'handoff' | 'skipped' | 'failed';
@@ -1302,6 +1304,8 @@ export interface AuditEventRecord {
   accountId?: string;
   reason?: string;
   createdAt: string;
+  occurrenceCount?: number;
+  lastSeenAt?: string;
 }
 
 export type AgentSessionStatus = 'active' | 'archived';
@@ -1515,7 +1519,8 @@ export interface Store {
   persistAutoReplyOutbox(input: { id: string; outboundMessageId: string }): Promise<boolean>;
   retryAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean>;
   deadLetterAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean>;
-  recordAudit(event: AuditEventRecord): Promise<void>;
+  recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void>;
+  cleanupAuditEvents(input: { createdBefore: string; limit?: number }): Promise<number>;
   listAgentSessions(adminId: string, query?: { accountId?: string; search?: string }): Promise<AgentSessionRecord[]>;
   createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord>;
   updateAgentSessionTitle(adminId: string, sessionId: string, title: string): Promise<AgentSessionRecord | undefined>;

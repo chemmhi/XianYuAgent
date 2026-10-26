@@ -1,3 +1,4 @@
+import { isRoutineAudit } from './record-retention-policy.js';
 import { VerificationRuntime, type VerificationRuntimeOptions } from './verification-runtime.js';
 import { accountOverviews } from './account-overview.js';
 import { connectionView } from './account-connection.js';
@@ -198,7 +199,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution, new PersistentAutomationExecutionLedger(store));
   const productAutomationTrigger = new ProductAutomationTrigger(store, productAutomation, productAutomationWorkflow, productAutomationExecution, async (input) => {
     const auditId = createId();
-    await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() }, { routine: isRoutineAudit(input.action, input.payload) });
     return auditId;
   }, {
     executionMode: config.productAutomationExecutionMode,

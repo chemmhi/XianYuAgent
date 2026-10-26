@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { PostgresStore } from '../src/store-postgres.js';
 import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from '../src/product-automation.js';
 import { XianyuProductAutomationExecutionAdapter } from '../src/product-automation-xianyu.js';
 import type { XianyuImService } from '../src/xianyu-im-service.js';
 import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
-const DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
+const DATABASE_URL = process.env.RECORD_RETENTION_TEST_DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
 
 test('verified partial delivery restores only its image checkpoint and queues missing content once', async () => {
   const store = new PostgresStore(DATABASE_URL);
@@ -38,6 +39,16 @@ test('verified partial delivery restores only its image checkpoint and queues mi
     await store.pool.query("update coupons.coupon_batches set updated_at=(select created_at-interval '1 millisecond' from orders.delivery_send_steps where account_id=$2 and order_no=$3) where id=$1", [batch.id, account.id, orderNo]);
 
     await store.resumeVerifiedPartialDelivery({ ...input, externalMessageRef: 'image.PNM' });
+    // Simulate the previous release: only audit evidence exists. The migration
+    // must backfill it idempotently before all old audit records are deleted.
+    await store.pool.query('update orders.delivery_send_steps set recovery_verified_at=null where account_id=$1', [account.id]);
+    const migration = await readFile(new URL('../migrations/071_record_retention.sql', import.meta.url), 'utf8');
+    await store.pool.query(migration);
+    await store.pool.query(migration);
+    assert.ok((await store.pool.query('select recovery_verified_at from orders.delivery_send_steps where account_id=$1', [account.id])).rows[0].recovery_verified_at);
+    await store.pool.query("update observability.audit_events set created_at=now()-interval '4 days' where account_id=$1", [account.id]);
+    await store.cleanupAuditEvents({ createdBefore: new Date(Date.now() - 3 * 86400_000).toISOString() });
+    assert.equal((await store.pool.query('select count(*)::int count from observability.audit_events where account_id=$1', [account.id])).rows[0].count, 0);
     const state = await store.pool.query(`select s.status step_status,s.external_ref,g.status guard_status,r.status reservation_status,
       l.retryable,l.result_json->>'reason' ledger_reason,j.status job_status,j.attempt_count
       from orders.delivery_send_steps s join orders.delivery_send_guards g on g.account_id=s.account_id and g.order_no=s.order_no
