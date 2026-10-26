@@ -35,7 +35,7 @@ export function VerificationOutcome({ session, onDismiss }: { session: Verificat
         {retryable && context && <Button type="button" variant="primary" disabled={busy} onClick={() => {
           setBusy(true); setError('');
           void context.retry(session.subject).catch(() => setError('无法发起人工重试，请重新扫码授权。')).finally(() => setBusy(false));
-        }}>{busy ? '正在准备…' : '我来重试'}</Button>}
+        }}>{busy ? '正在准备…' : '重试'}</Button>}
       </div>
     </footer>
   </section>;

@@ -173,7 +173,7 @@ export function VerificationAccountActions({ accountId }: { accountId: string })
   return <><button type="button" className="btn ghost" disabled={busy} onClick={() => {
     if (active) { verification.open(active.id); return; }
     setBusy(true); setError(''); void verification.retry({ accountId }).catch(() => setError('验证发起失败，请重试。')).finally(() => setBusy(false));
-  }}>{busy ? '准备中…' : active ? '查看验证' : '我来重试'}</button>{error && <small role="alert">{error}</small>}</>;
+  }}>{busy ? '准备中…' : active ? '查看验证' : '重试'}</button>{error && <small role="alert">{error}</small>}</>;
 }
 
 export function VerificationQrPanel({ loginSessionId }: { loginSessionId: string }) {

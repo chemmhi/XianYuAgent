@@ -63,7 +63,7 @@ export function failureLabel(code?: string): string {
   if (code?.includes('PRESENTATION_NOT_READY')) return '验证画面尚未就绪，本轮未开始人工操作。请重新获取画面。';
   if (code?.includes('BUDGET')) return '自动尝试已达上限，请选择人工重试或重新扫码授权。';
   if (code?.includes('HANDOFF') || code?.includes('RECHECK')) return '验证码已通过，连接检查未完成。账号仍需处理，请查看具体状态。';
-  if (code?.includes('WAITING_FOR_HUMAN')) return '本轮仅限人工处理，未运行自动操作。你可以再次选择“我来重试”。';
+  if (code?.includes('WAITING_FOR_HUMAN')) return '本轮仅限人工处理，未运行自动操作。你可以再次选择“重试”。';
   if (code?.includes('OWNER') || code?.includes('UNAVAILABLE') || code?.includes('RELEASE')) return '验证连接已停止，请重新发起验证。';
   if (code?.includes('UNKNOWN')) return '平台结果尚未确认，本轮已停止，请先核对账号状态。';
   return '本轮未确认账号恢复，请人工重试或重新扫码授权。';

@@ -32,7 +32,7 @@ async function scenario(name, run, options = {}) {
     const panel = page.getByTestId('verification-panel');
     const row = async () => (await f.runtime.verification.coordinator.repository.list()).filter(s => s.subject.accountId === f.account.id).sort((a, b) => b.createdAt - a.createdAt)[0];
     const start = async () => {
-      await page.getByRole('button', { name: '我来重试', exact: true }).click();
+      await page.getByRole('button', { name: '重试', exact: true }).click();
       await wait(() => panel.getByRole('button', { name: '我来操作', exact: true }).isEnabled().catch(() => false), Boolean, 'claim readiness');
     };
     const claim = async () => { await panel.getByRole('button', { name: '我来操作', exact: true }).click(); await wait(() => panel.getAttribute('data-state'), v => v === 'human_active', 'human active'); };
@@ -172,7 +172,7 @@ await scenario('duplicate-tab-has-distinct-owner', async ({ f, page, context, we
 
 await scenario('visibility-gates-first-frame', async ({ f, page, panel, image, row, wait }) => {
   const opacity = await page.addStyleTag({ content: '.verification-image img{opacity:0!important}' });
-  await page.getByRole('button', { name: '我来重试', exact: true }).click(); await image.waitFor();
+  await page.getByRole('button', { name: '重试', exact: true }).click(); await image.waitFor();
   await page.waitForTimeout(500); assert.equal((await row()).state, 'preparing'); assert.equal((await row()).priorityDeadline, undefined);
   const box = await image.boundingBox();
   await page.evaluate(rect => { const mask = document.createElement('div'); mask.id = 'verification-fixture-mask'; Object.assign(mask.style, { position: 'fixed', zIndex: '999', left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width * 0.16}px`, height: `${rect.height * 0.3}px`, background: 'white' }); document.body.append(mask); }, box);
@@ -187,9 +187,9 @@ await scenario('new-session-reopens-collapsed-dialog', async ({ f, page, panel, 
   await start(); const previous = await row(); await page.getByRole('button', { name: '收起验证弹窗' }).click();
   assert.equal(await panel.count(), 0);
   await f.runtime.verification.cancel(f.account.id);
-  await wait(() => page.getByRole('button', { name: '我来重试', exact: true }).count(), n => n === 1, 'cancelled session projected');
+  await wait(() => page.getByRole('button', { name: '重试', exact: true }).count(), n => n === 1, 'cancelled session projected');
   await wait(async () => f.contexts.every(context => context.pages().length === 0), Boolean, 'old original context has closed');
-  await page.getByRole('button', { name: '我来重试', exact: true }).click();
+  await page.getByRole('button', { name: '重试', exact: true }).click();
   const next = await wait(row, value => value && value.id !== previous.id, 'new persisted session after pending retry');
   await wait(() => panel.getAttribute('data-state'), state => state === 'priority_wait', 'pending manual retry automatically opens the ready next session');
   assert.notEqual(next.id, previous.id);

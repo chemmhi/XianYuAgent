@@ -34,7 +34,7 @@ try {
     throw new Error(`Timed out: ${label}\n${(await page.locator('body').innerText()).slice(-1800)}`);
   };
   await page.goto(`${webUrl}/accounts`); await page.bringToFront();
-  await page.getByRole('button', { name: '我来重试', exact: true }).click();
+  await page.getByRole('button', { name: '重试', exact: true }).click();
   const panel = page.getByTestId('verification-panel');
   const claim = panel.getByRole('button', { name: '我来操作', exact: true });
   await wait(() => claim.isEnabled().catch(() => false), Boolean, 'decoded visible fresh frame and stream');

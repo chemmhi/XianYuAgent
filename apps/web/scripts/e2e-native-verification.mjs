@@ -41,7 +41,7 @@ try {
   };
   await page.goto(`${webUrl}/accounts`); await page.bringToFront();
   const beforeClaim = Date.now();
-  await page.getByRole('button', { name: '我来重试', exact: true }).click();
+  await page.getByRole('button', { name: '重试', exact: true }).click();
   const panel = page.getByTestId('verification-panel');
   const row = await wait(async () => (await fixture.runtime.verification.coordinator.repository.list()).find(s => s.subject.accountId === fixture.account.id), Boolean, 'persisted verification');
   assert.equal(row.presentationKind, 'native_iframe');
@@ -111,7 +111,7 @@ try {
   const persisted = await fixture.runtime.store.pool.query('select data from accounts.verification_sessions where id=$1', [row.id]);
   assert.doesNotMatch(JSON.stringify(persisted.rows), /native-frontend-passed|x5secdata|addCookieToHeader/);
   await page.screenshot({ path: join(evidence, 'native-success-mobile.png') });
-  assert.equal(await panel.getByRole('button', { name: '我来重试', exact: true }).count(), 0, 'success must not offer a new challenge');
+  assert.equal(await panel.getByRole('button', { name: '重试', exact: true }).count(), 0, 'success must not offer a new challenge');
   const completedRounds = (await fixture.runtime.verification.coordinator.repository.list()).length;
   await panel.getByRole('button', { name: '完成', exact: true }).click();
   await page.locator('.verification-modal').waitFor({ state: 'detached' });

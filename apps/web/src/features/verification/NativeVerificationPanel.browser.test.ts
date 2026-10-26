@@ -180,7 +180,7 @@ it.each([{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width:
         await control(page, { type: 'state', value: state, failureCode: 'VERIFICATION_PLATFORM_REJECTED' });
         await page.locator(`[data-state="${state}"]`).waitFor();
         const retryable = ['failed','expired','cancelled'].includes(state);
-        expect(await page.getByRole('button', { name: '我来重试', exact: true }).count()).toBe(retryable ? 1 : 0);
+        expect(await page.getByRole('button', { name: '重试', exact: true }).count()).toBe(retryable ? 1 : 0);
         const geometry = await page.locator('.verification-modal').evaluate(element => {
           const body = element.querySelector('.verification-modal-body')!, area = element.querySelector('.verification-image')!;
           const content = element.querySelector('.verification-outcome-copy')!, footer = element.querySelector('.verification-footer')!;
@@ -202,7 +202,7 @@ it('retries a failed outcome through the existing manual-only retry and opens th
   const page = await pageFor();
   try {
     await control(page, { type: 'state', value: 'failed', failureCode: 'VERIFICATION_PLATFORM_REJECTED' });
-    await page.getByRole('button', { name: '我来重试', exact: true }).click();
+    await page.getByRole('button', { name: '重试', exact: true }).click();
     await page.locator('[data-state="priority_wait"]').waitFor();
     expect((await stats(page)).retries).toBe(1);
     await expect.poll(async () => (await stats(page)).claims).toBe(2);
@@ -214,9 +214,9 @@ it('keeps a failed outcome open with an error and restores its buttons if retry 
   const page = await pageFor();
   try {
     await control(page, { type: 'state', value: 'failed' }); await control(page, { type: 'rejectRetry' });
-    await page.getByRole('button', { name: '我来重试', exact: true }).click();
+    await page.getByRole('button', { name: '重试', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: '无法发起人工重试' }).waitFor();
-    expect(await page.getByRole('button', { name: '我来重试', exact: true }).isEnabled()).toBe(true);
+    expect(await page.getByRole('button', { name: '重试', exact: true }).isEnabled()).toBe(true);
     await page.getByRole('button', { name: '关闭', exact: true }).click();
     await page.locator('.verification-modal').waitFor({ state: 'detached' });
     expect((await stats(page)).retries).toBe(1);
@@ -231,7 +231,7 @@ it('keeps native QR success and cancellation inside the login host without a sec
       await page.locator(`[data-state="${state}"]`).waitFor();
       expect(await page.getByTestId('qr-host').isVisible()).toBe(true);
       expect(await page.locator('.verification-modal').count()).toBe(0);
-      expect(await page.getByRole('button', { name: /^(完成|关闭|我来重试)$/ }).count()).toBe(0);
+      expect(await page.getByRole('button', { name: /^(完成|关闭|重试)$/ }).count()).toBe(0);
     }
     expect((await stats(page)).retries).toBe(0);
   } finally { await page.close(); }

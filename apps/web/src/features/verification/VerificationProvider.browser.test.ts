@@ -353,7 +353,7 @@ it.each([
     if(viewport.name!=='low-screen')for(const state of [preparing,ready,reconnecting,failed]){
       expect(state.bodyScrollHeight!,JSON.stringify(state)).toBeLessThanOrEqual(state.bodyHeight!);
     }
-    await page.getByRole('button', {name:'我来重试',exact:true}).scrollIntoViewIfNeeded();
+    await page.getByRole('button', {name:'重试',exact:true}).scrollIntoViewIfNeeded();
     expect((await dimensions()).height).toBe(preparing.height);
     await step('Layout long result');
     await expect.poll(()=>page.locator('.verification-results li').count()).toBe(12);
