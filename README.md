@@ -1,241 +1,210 @@
-# XianyuSellerAgent
+# FishAgent
 
-本仓库采用根目录 npm workspaces 统一管理前端与后端。
+**以 Agent 为核心的闲鱼运营平台，覆盖智能客服、商品管理、卡密交付和多用户协作。**
 
-开发前检查 [项目经验与回归约束](docs/PROJECT_LESSONS.md)，尤其是全局 Toast、中文错误映射和禁止展示后端诊断码的规则。
+FishAgent 将对话、商品、订单和运营工具接入同一套工作流。自动回复 Agent 会根据问题主动获取买家的对话上下文、商品详情与订单事实；运营者也可以在 Workspace 中用自然语言管理商品、卡密、订单和自动化配置。
 
-目录边界：
+## 核心优势与项目区别
 
-- `apps/web/`：正式 React + Vite 前端应用。
-- `apps/api/`：Node HTTP API、数据库迁移和独立 Worker 入口。
-- `SellerAgent/`：只读高保真原型与视觉参考，不是正式业务前端目录。
-- `xianyu-admin-design-style/`：design token 与视觉规范参考。
+本项目的重点是让 Agent 获取真实业务上下文、调用工具并完成任务，将客服与店铺运营连成一条链路。选型时，可以从以下方面比较：
 
-## 常用命令
+| 能力 | FishAgent 的做法 | 实际价值 |
+| --- | --- | --- |
+| Agent 自动回复 | 按需调用工具，读取相关对话、商品详情、商品知识库和买家订单，再生成回复 | 能处理连续追问和商品相关问题，减少逐条维护关键词与固定话术的工作 |
+| 两套模型 API Key | 支持主、备两套独立的 API Key、接口地址与模型配置，提供自动切换、故障熔断和恢复探测 | 应对模型服务故障、超时、限流和密钥不可用，降低单一模型服务中断的影响 |
+| 自动登录与授权恢复 | 支持账密登录、加密保存账密、持久化设备状态，授权过期后自动尝试重新登录 | 减少反复粘贴 Cookie 和手动恢复账号的操作 |
+| 滑块与官方验证 | 支持可配置的自动滑块验证；需要扫码或人脸时，通过官方验证流程继续授权 | 将验证和登录恢复纳入账号管理流程，保留必要的人工接管入口 |
+| Workspace 运营 Agent | 用自然语言创建或导入卡密、编辑和发布商品、管理订单、修改自动回复与商品自动化规则 | 把“查询情况—准备操作—确认执行—查看结果”放在同一个工作区 |
+| 自动发货 | 付款后按商品规则交付卡密或其他内容，支持库存预留、去重和交付记录 | 将订单、商品绑定和交付库存串联起来，减少漏发与重复发货 |
+| 邀请码与多用户 | 管理员通过邀请码开放使用，可管理有效期、启停和续期，业务数据按用户及账号权限隔离 | 一套平台可供多个受邀用户使用，各自管理授权账号 |
+| 多层上下文 | 区分平台用户、闲鱼账号、买家和具体任务的上下文 | 多用户、多账号运行时，Agent 能围绕当前身份和业务范围处理任务 |
 
-首次安装：
+### 自动回复：先取事实，再回答
+
+自动回复由具备工具调用能力的 Agent 执行。它会根据当前问题选择读取哪些信息：
+
+- **对话上下文**：当前消息、待回答消息，以及同一账号下该买家的相关会话。
+- **商品上下文**：商品详情、价格、商品知识库和店铺商品搜索结果。
+- **订单上下文**：当前买家的订单及交付相关事实。
+- **账号配置**：当前闲鱼账号的回复风格、启停状态和运行参数。
+
+信息不足时，Agent 可以继续查询相关工具；确实无法处理时转交人工。系统支持人工介入后停止自动回复、分段发送、发送前检查和结果跟踪，执行过程可在 Agent 动态中查看。上下文按需获取，不会把全部商品和全部聊天记录一次性塞进每个请求。
+
+### 主备模型：两套配置应对模型服务风险
+
+每个账号可以配置主模型与备用模型，分别设置 API Key、Base URL 和模型。系统支持自动路由、手动优先主模型、手动优先备用模型，并根据故障状态进行切换、冷却和恢复探测。
+
+这里的主备机制用于模型 API 的可用性保障；闲鱼账号的登录与平台安全验证由独立的授权恢复流程处理。详见 [模型主备切换](docs/model-provider-failover-v2.md)。
+
+### Workspace：通过 Agent 管理业务
+
+Workspace 可以读取经营概览、账号状态、商品、卡券、订单和 Agent 运行记录，并生成操作计划。例如：
+
+- “查看当前账号有哪些商品，找出需要完善知识库的商品。”
+- “新建一批卡密，导入后绑定到指定商品。”
+- “修改这个商品的描述，并准备发布。”
+- “为这个商品开启付款后自动发货。”
+- “查看发货失败的订单，准备重试。”
+- “调整当前账号的自动回复配置。”
+
+涉及新增卡密、修改商品、发布、发货或配置变更的操作，会按权限和操作策略生成确认计划，由用户确认后执行，并保留任务步骤、执行结果和审计记录。商品发布需要先具备商品资料与图片；外部结果未知时会先核对状态，避免盲目重复操作。管理员还可通过 Skills 扩展工具能力，受邀用户的能力受角色与授权范围约束。
+
+### 用户级、账号级与买家级上下文
+
+| 层级 | 上下文范围 |
+| --- | --- |
+| 平台用户级 | 当前登录用户、角色、可访问账号、工作区会话和个人 Skill 授权范围 |
+| 闲鱼账号级 | 该账号的商品、卡券、订单、模型配置、自动回复配置和连接状态 |
+| 买家级 | 同一闲鱼账号下，该买家的相关对话、当前问题和订单信息 |
+| 任务级 | Workspace 当前会话、执行计划、工具结果和待确认操作 |
+
+账号级自动回复配置与 Workspace 的运营任务职责分开，切换账号不会扩大用户原有的数据访问权限。
+
+### 自动登录、滑块与授权恢复
+
+账号管理支持 **扫码登录、账号密码登录、手动输入 Cookie** 三种入口。
+
+账密登录通过服务端 HTTP 提交，后台持久化官方 SDK 环境负责生成当次设备参数，不打开可见的登录窗口。登录成功后，账密加密保存；后续检测到授权过期，会使用保存的账密尝试恢复。普通网络断连先检查现有登录态并重连，避免不必要地重复登录。
+
+系统已有 QR/IM 验证链路支持配置自动滑块验证及有限重试；**当前密码登录出现滑块、扫码或人脸验证时，通过项目的独立验证弹窗由用户按官方提示完成**，随后继续同一登录会话。是否需要验证由平台决定，不保证所有挑战都能自动通过。人工停用、删除或撤销授权的账号不会被自动登录重新启用。
+
+运行要求：稳定的 `CREDENTIAL_ENCRYPTION_KEY`、真实闲鱼模式、正式版 Google Chrome，以及可持久化的浏览器数据目录。使用密码登录需运行到 `076` 数据库迁移。详见 [密码登录与授权恢复](docs/operations/password-login-investigation-20261105.md) 和 [滑块验证说明](docs/17-xianyu-slider-solver.md)。
+
+### 自动发货与邀请使用
+
+商品可以绑定交付内容，支持固定文本、批量卡密、API 接口和图片等卡券类型。启用对应商品规则后，系统根据付款和订单状态执行交付，记录库存预留、发送及结果；失败或结果未知时进入后续核对和处理流程。
+
+平台管理员可以生成邀请码，邀请其他用户注册使用，并管理邀请码及其关联使用权限的有效期、启停和续期。受邀用户管理自己获得授权的闲鱼账号，不会自动继承邀请人的账号、模型密钥或业务数据。
+
+## 功能入口
+
+| 页面 | 主要用途 |
+| --- | --- |
+| 仪表盘 | 经营概览、订单与自动化处理情况 |
+| Workspace | 自然语言运营、业务查询、操作计划与执行跟踪 |
+| 账号管理 | 绑定账号、登录与重新授权、连接状态管理 |
+| 在线聊天 | 查看会话和消息、人工接管 |
+| 商品管理 | 商品同步、编辑、发布、知识库和自动化规则 |
+| 卡券管理 | 卡密批次、交付内容、库存及商品绑定 |
+| 订单管理 | 订单同步、交付结果及异常处理 |
+| Agent 动态 | 查看自动回复阶段、工具调用和执行结果 |
+| 设置 | 自动回复、主备模型配置；管理员额外管理邀请码 |
+
+## 本地运行
+
+### 环境要求
+
+- Node.js `>=24.12.0 <25`、npm `>=11.6.0 <12`。
+- Docker Engine / Docker Desktop 与 Docker Compose，用于 PostgreSQL、Redis 和 MinIO。
+- 正式版 Google Chrome，用于登录设备 SDK、浏览器验证和真实浏览器测试。
+
+项目采用根目录 npm workspaces 统一管理前后端，使用根目录的锁文件。
+
+### 安装与启动
+
+首次配置时复制模板；已有 `.env` 请保留并按需补充字段：
 
 ```powershell
-npm ci
-```
-
-Windows dependency install should stop local dev processes first:
-
-```powershell
+Copy-Item .env.example .env
 npm run deps:ci
 ```
 
-Running Node/Vite processes lock native `.node` files. Executing `npm ci` while dev is running causes `EPERM`; `deps:ci` stops the managed API, Worker, and Web process tree before reinstalling.
+在 `.env` 中设置独立、长期保存的 `CREDENTIAL_ENCRYPTION_KEY`，替换示例占位值。已有加密数据时不要直接更换该密钥。模型配置可以通过设置页面保存主、备两套配置。
 
-本地同时启动 API 与前端：
+启动前确认 Docker 已运行：
 
 ```powershell
-$env:XIANYU_QR_MODE = "real"
-$env:ALLOW_IN_MEMORY = "true"
-$env:COOKIE_SECURE = "false"
-$env:VITE_API_MODE = "live"
 npm run dev
 ```
 
-根命令 `npm run dev` 会给 API 和 Worker 共享本次启动专用的随机 IM 通信密钥，保持已有凭证加密密钥不变。单独运行 `dev:api` / `dev:worker` 时，需给两者设置相同的 `XIANYU_IM_OWNER_SECRET`（至少 32 字符）；未设置时沿用 `CREDENTIAL_ENCRYPTION_KEY` 作为内部认证密钥。
+该命令会准备 PostgreSQL、Redis、MinIO，执行迁移，并启动 API、Worker 与 Web。默认从 API `8080`、Web `5173` 开始寻找可用端口，实际地址以终端输出为准；前端代理和 WebSocket 来源会同步配置。开发脚本默认使用真实闲鱼模式及 `AUTO_REPLY_SEND_MODE=live`；模拟发送需要调整相应启动配置为 `simulate`。
 
-Stop the managed local dev process tree:
+根命令会为本次 API/Worker 启动共享随机 IM 通信密钥，同时保留已有凭证加密密钥。独立启动 API 与 Worker 时，需设置相同的 `XIANYU_IM_OWNER_SECRET`（至少 32 字符）；未设置时沿用凭证加密密钥。
+
+停止开发进程或重新安装依赖：
 
 ```powershell
 npm run dev:stop
+npm run deps:ci
 ```
 
-`npm run dev` 默认从 API 端口 `8080`、前端端口 `5173` 开始查找；端口被占用时逐个递增，保留占用端口的其他服务。终端会输出实际的 API 和前端地址，并自动同步前端 `/api`（含 WebSocket）代理和 API 的 WebSocket 允许来源，无需手动调整。
+`deps:ci` 会先停止项目管理的开发进程，再安装依赖，避免 Windows 下运行中的原生依赖文件被锁定。
 
-可通过环境变量或根目录 `.env` 中的 `PORT`、`VITE_PORT` 修改起始端口；环境变量优先。端口必须为 `1–65535` 的整数，查找到 `65535` 仍无空闲端口时会明确报错。独立执行 `dev:api` / `dev:web` 时仍需自行通过 `PORT`、`VITE_API_PROXY_TARGET`（或 `VITE_API_BASE_URL`）匹配后端地址。
-
-需要单独观察 Worker 时：
-
-```powershell
-npm run dev:worker
-```
-
-默认地址（被占用时以启动日志为准）：
-
-- 前端：`http://localhost:5173`
-- API：`http://localhost:8080`
-
-分开启动（仅用于排障）：
-
-```powershell
-npm run dev:api
-npm run dev:web
-```
-
-构建、类型检查和测试：
+### 检查与测试
 
 ```powershell
 npm run typecheck
-npm run build
 npm test
-npm run test:dev-lifecycle
-npm run test:dev-compose
+npm run build
 npm run test:e2e:chrome
 npm run verify
 ```
 
-前端真实浏览器 E2E 使用本机已安装的 Google Chrome，通过 Chrome DevTools Protocol 执行；项目不安装或引入 Playwright。
+前端浏览器 E2E 使用本机 Chrome 和 Chrome DevTools Protocol；登录与验证运行时使用 Patchright 驱动系统 Chrome。隔离测试夹具通过不等于真实闲鱼账号已登录，真实授权与发货需要在对应环境核验。
 
-### 参考项目的真实登录态
+密码登录专项验证：
 
-`http://localhost:9000/accounts` 是 PRD 中的参考项目账号页，不是本项目正式前端。进行真实闲鱼扫码、复用参考项目 Cookie 或检查参考项目接口时，必须在当前已经打开且已登录闲鱼的 Chrome 窗口中直接打开该地址。不要使用无痕窗口、无头窗口、另一套 `--user-data-dir` 或新启动的独立 Chrome 实例，否则浏览器 Cookie、Local Storage 和登录态不会复用。
+```powershell
+npm --workspace apps/api run test:password-login
+npm --workspace apps/api run test:password-login:postgres
+npm --workspace apps/api run test:password-login:e2e
+```
 
-本项目的 `npm run test:e2e:chrome` 使用临时隔离 Chrome profile 仅验证本地前端/API 跨层链路；它不会证明参考项目的真实浏览器登录态，也不会替代人工在当前 Chrome 中打开上述地址进行复核。
+后两项要求先将 `PASSWORD_LOGIN_TEST_DATABASE_URL` 指向本机专用数据库 `xianyu_password_login_test`，数据库用户需有 `CREATEDB` 权限；测试会创建和清理随机子库，不要连接生产数据库。
 
-Docker Compose：
+### Docker 与项目目录
 
 ```powershell
 npm run compose:config
-npm run compose:up
 npm run compose:up:d
 npm run compose:logs
 npm run compose:ps
 npm run compose:down
 ```
 
-Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
+开发 Compose 管理 API、Worker、PostgreSQL、Redis 和 MinIO；Web 使用根目录开发命令启动。MinIO 映射到 `19000/19001`，可用 `OBJECT_STORAGE_IMAGE` 覆盖开发镜像。
 
-开发环境 MinIO 默认使用与生产相同的 `minio/minio:latest` 镜像。需要使用镜像代理或固定版本时，在根目录 `.env` 设置 `OBJECT_STORAGE_IMAGE=镜像地址:版本`，或通过同名环境变量覆盖。`npm run test:dev-compose` 验证默认值和覆盖行为，需要 Docker Compose CLI，不会启动容器或拉取镜像。
+- `apps/web/`：正式 React + Vite 前端。
+- `apps/api/`：Node.js / TypeScript API、数据库迁移与 Worker。
+- `SellerAgent/`：只读原型及视觉参考。
+- `xianyu-admin-design-style/`：设计规范参考。
+- `docs/`：架构、功能、验收及运维文档。
 
-## 生产部署（GitHub Push 自动部署）
+## 生产部署
 
-生产部署的唯一代码来源是 GitHub `origin/main`。禁止向服务器裸仓库直接 `git push`，禁止从开发机使用 `scp`、`rsync` 或其他方式上传代码，禁止在服务器工作树中手工改代码。以下命令以 SSH 别名 `server-prod` 和服务器目录 `/home/ubuntu/xianyu-agent-prod` 为例；如果目录或别名不同，只替换这两个值。
+生产代码从 GitHub `origin/main` 获取。变更先在功能分支完成检查，再在本地合入 `main`，最后推送；不要从功能分支直接推送到远程 `main`。
 
-> **自动部署已启用（2026-10-06）**：向 `main` 推送后，GitHub Actions 会自动校验本次提交，通过固定 SSH 主机指纹连接服务器，拉取同一 SHA，重建 API/Worker，并在服务器上构建、备份和发布前端静态文件。常规发布不需要再手工登录服务器。
+```powershell
+# 在已确认干净的本地 main 工作区执行
+# codex/<功能分支> 替换为已完成验证的实际分支名
 
-自动发布链路如下：
+git switch main
+git merge --no-ff codex/<功能分支>
+git push origin main
+```
+
+当前仓库的 `main` 推送会触发 [生产部署工作流](.github/workflows/deploy-production.yml)，服务器拉取同一 SHA 后执行 [统一部署脚本](scripts/deploy-production.sh)：
 
 ```text
-git push origin HEAD:main
-  → .github/workflows/deploy-production.yml
-  → git fetch/pull --ff-only + SHA 校验
-  → scripts/deploy-production.sh（前端构建/备份/发布 + API/Worker 迁移/重建）
-  → /healthz、/readyz、会话接口与生产站点验收
+本地合入 main 并推送 GitHub
+  → GitHub Actions 校验部署配置与 SSH 主机指纹
+  → 服务器 fetch / pull --ff-only，并核对提交 SHA
+  → 构建前端与后端镜像，执行数据库迁移，重建 API / Worker
+  → 后端健康检查，备份并发布前端，检查公网入口
 ```
 
-### 1. 提交并推送代码
+自建部署需配置自己的服务器、域名、`.env` 和 GitHub Actions secrets：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`，以及可选的 `DEPLOY_PORT`、`DEPLOY_PATH`。当前工作流将服务器 `origin` 限制为 `chemmhi/XianYuAgent`，使用 fork 时还需同步修改工作流中的仓库来源校验。统一脚本有当前部署环境的默认路径与域名，自建时应按实际环境配置。生产使用 `compose.prod.yml`，不要直接套用开发 Compose 的端口与凭据。
 
-在本地工作树执行：
+发布保留数据卷和浏览器目录，已有数据库需要显式迁移。密码登录在 API owner 上运行，Worker 不重复启动恢复任务。发布后应核对功能开关、加密密钥、迁移和 Chrome 是否实际生效；仅 `/healthz` 返回成功不能证明账号已恢复。完整配置、备份及回滚方法见 [生产部署说明](docs/operations/production-deployment.md)。
 
-```powershell
-git status --short
-npm ci
-npm run typecheck
-npm run build
-docker compose config --quiet
-git diff --check
-git add <已确认的文件>
-git commit -m "<说明本次部署变更>"
-git push origin HEAD:main
-```
+## 进一步阅读
 
-不要把其他未相关的工作树改动一起提交。推送成功后，服务器只能从 GitHub 拉取该提交；服务器上的本地裸仓库、临时目录或手工复制都不属于发布链路。
-
-仓库已配置并启用 GitHub Actions 工作流 `.github/workflows/deploy-production.yml`：每次推送到 `main` 都会通过 SSH 拉取并部署刚推送的精确提交；也可以在 GitHub Actions 页面手动执行 `workflow_dispatch`。如需新增服务器或轮换凭据，在仓库 `Settings → Secrets and variables → Actions` 维护以下 secrets：
-
-- `DEPLOY_HOST`：生产服务器主机名或 IP；
-- `DEPLOY_PORT`：SSH 端口，可省略（默认 `22`）；
-- `DEPLOY_USER`：SSH 登录用户；
-- `DEPLOY_SSH_KEY`：仅用于部署的 Ed25519 私钥；
-- `DEPLOY_KNOWN_HOSTS`：生产服务器的固定 `known_hosts` 行；
-- `DEPLOY_PATH`：部署目录，可省略（默认 `/home/ubuntu/xianyu-agent-prod`）。
-
-工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后只执行统一入口 `scripts/deploy-production.sh`。统一入口先在 Node 容器中构建前端，再迁移并重建 API/Worker；后端健康检查通过后才备份并发布 `apps/web/dist`，前端同步或站点验收失败会自动恢复备份，避免 UI 与后端半发布。
-
-### 2. 手工恢复与排障（仅必要时）
-
-以下步骤不属于常规发布链路，仅用于 GitHub Actions 故障、服务器维护或紧急回滚。正常发布只需推送 `main` 并查看 Actions 运行结果。
-
-#### 检查并更新服务器工作树
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && origin_url="$(git remote get-url origin)" && case "$origin_url" in https://github.com/chemmhi/XianYuAgent.git|git@github.com:chemmhi/XianYuAgent.git) ;; *) echo "拒绝部署：origin 必须指向 GitHub，当前为 $origin_url" >&2; exit 1;; esac && git status --short && git fetch origin main && git pull --ff-only origin main'
-```
-
-如果服务器存在未提交的代码改动，先停止部署并处理这些改动；`.env` 及 `.env.bak-*` 属于运行配置/备份，不应提交到 Git。首次切换旧服务器时，先将 `origin` 改为 GitHub，再执行上面的校验：
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && git remote set-url origin https://github.com/chemmhi/XianYuAgent.git'
-```
-
-#### 手工执行统一生产部署
-
-生产环境的 UI 与 API/Worker 必须通过同一个脚本执行，避免只更新一侧：
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && bash scripts/deploy-production.sh'
-```
-
-脚本会先构建前端；若 npm、镜像仓库或 Vite/TypeScript 构建失败，API/Worker 不会重启。后端健康检查通过后才备份和同步 Nginx 静态目录；`rsync` 或公网首页验收失败时会自动解压备份恢复旧 UI。
-
-#### 应用已有 PostgreSQL volume 的迁移
-
-已有数据卷不会因为 Compose 重建而自动重放新迁移。服务器必须从已拉取的 GitHub 工作树执行迁移，再开放新功能写入：
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && POSTGRES_PASSWORD="$(sed -n "s/^POSTGRES_PASSWORD=//p" .env | tr -d "\r" | head -n 1)" && test -n "$POSTGRES_PASSWORD" && docker run --rm --network xianyu-agent-prod_default -v "$PWD:/workspace" -w /workspace -e DATABASE_URL="postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent" node:24-bookworm-slim node apps/api/scripts/migrate.mjs'
-```
-
-#### 部署后验收
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose ps'
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose logs --tail=80 api worker'
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose exec -T postgres sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"select count(*) from settings.auto_reply_repair_policies;\""'
-```
-
-API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=repair` 和 `outcomeReviewWorker=enabled`；策略表至少应有一个有效账号策略。若出现 `28P01`，优先检查 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与已存在数据卷是否一致。
-
-### 3. 自动回复相关环境变量
-
-`.env` 是隐藏文件，`ls` 默认不会显示；它只在服务器上保存运行配置，不进入 Git。Compose 通过显式映射把需要的变量注入 API/Worker，不能假设“服务器有 `.env`”就等于“容器能读取 `.env`”。
-
-必需的生产开关：
-
-- `AUTO_REPLY_REPAIR_MODE=enforce`：启用修复后的自动回复主链路。
-- `AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED=true`：启用发送结果审核 Worker。
-- 入站 quarantine 与审计记录统一固定保留最近 72 小时，Worker 自动分批删除过期记录；关键审计在窗口内逐条保留。旧 `INBOUND_QUARANTINE_*` 不再控制保留期或清理开关。
-- `RECORD_CLEANUP_BATCH_SIZE=10000`、`RECORD_CLEANUP_POLL_MS=60000`：控制每批删除量和轮询间隔，每表每轮最多 20 批或 15 秒。普通跳过事件和相同系统消息按小时合并计数，详见 [记录保留与清理](docs/operations/record-retention.md)。
-- `AUTO_REPLY_MODEL_ENABLED=true`：允许使用配置的模型生成回复；仍受 `API_KEY`、`BASE_URL`、`MODEL` 等配置约束。
-- `AUTO_REPLY_SEND_MODE=live`：允许真实发送；排障或演练时可切换为 `simulate`。
-- `AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT=true`：账号没有持久化策略时，API 启动自动写入版本化默认策略。
-- `AUTO_REPLY_POLICY_JSON`：兼容兜底用的完整 JSON bundle，包含 policy、pre-send policy 和 outcome policy。正常生产不再依赖它；只有关闭默认策略引导或无法写入策略表时才需要提供。
-
-数据库和容器内连接：
-
-- `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`：PostgreSQL 数据卷初始化和应用连接使用的凭据；已有数据卷的密码必须保持一致。
-- `DATABASE_URL_DOCKER`、`REDIS_URL_DOCKER`：可选的容器内连接覆盖。不要把仅适用于宿主机的 `127.0.0.1` 地址直接当作容器间地址。
-
-完整模板见 `.env.example`。自动回复策略的正常启动路径是“读取账号持久化策略 → 缺失时自动引导默认策略 → 兼容配置兜底”，因此后续按本节 Git 部署流程发布时，不应再因为漏配 `AUTO_REPLY_POLICY_JSON` 而导致 `POLICY_CONFIG_UNAVAILABLE`。
-
-quarantine 清理验收：先确认 Worker 启动日志包含 `quarantineCleanupWorker=enabled` 及实际 retention/batch/poll 参数，再观察以下指标持续下降；DELETE 只释放 PostgreSQL 可复用空间，若要立即缩小既有数据卷，需在低峰另行执行 `VACUUM (ANALYZE)` 并评估 `VACUUM FULL`/`pg_repack`。
-
-真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
-
-聊天会话保活通过纯 HTTP 顺序调用登录身份检查与 IM token 接口，按北京时间随机调度：09:00–21:00 每 25–45 分钟，07:00–09:00 / 21:00–24:00 每 45–90 分钟，00:00–07:00 每 90–180 分钟。跨时段边界只重新计划，不在整点强制请求。健康 WebSocket 不重连，自动回复和消息接收继续运行；旧 `XIANYU_CREDENTIAL_REFRESH_INTERVAL_MS` 已废弃。验证命令：`npm --workspace apps/api run test:xianyu-chat-refresh`。
-
-二维码或 IM 遇到风控验证时，可启用 Patchright 驱动的系统 Chrome：
-
-- `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端按账号/会话启动持久化系统 Chrome；
-- `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认使用系统 Chrome 有头引擎；自动模式窗口移出屏幕，避免出现空白验证窗口；
-- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：使用 Patchright 页面 API 和鼠标事件执行滑块轨迹；达到重试上限后返回验证失败，不伪造成功；生产与开发 Compose 的 API 默认 `launch + auto`，显式 `.env` 值优先；未配置的直接 Node 启动和 `.env.example` 为 `disabled`；
-- `XIANYU_VERIFICATION_SLIDER_MAX_RETRIES=3`：单次验证最多自动尝试次数；
-- 验证完成后，服务端必须同时确认页面已离开验证态并拿到新的 `x5sec`，随后关闭浏览器上下文。
-
-滑块适配位于 `apps/api/src/xianyu-slider-trajectory.ts` 与 `apps/api/src/xianyu-slider-solver.ts`：
-
-1. 通过 Patchright locator 在主文档和 iframe 中发现验证码容器、滑块按钮和轨道；
-2. 按轨道右边缘与按钮右边缘之差计算水平位移；
-3. 生成带加减速、轨道内二维抖动、末端微调和时间轴延迟的轨迹，不越过轨道右边缘；
-4. 通过 Patchright `page.mouse` 回放真实按下、移动、释放事件；
-5. 轮询成功/失败文本和页面 URL；失败时点击重试控件或刷新验证页；
-6. 达到自动重试上限后返回验证错误；只有新的 `x5sec` 且页面离开验证态才算通过，IM 还会重试 token 接口确认业务恢复。
-
-该实现不依赖裸 CDP，也不在服务端日志中输出业务 Cookie 或 Token；服务器部署时需要可执行的正式版 Chrome。验证上下文完成后立即关闭，持久化 profile 仅用于复用账号登录态。
-
-普通 `npm run dev` 继承环境配置，不强制启用滑块；`dev:api:verification` / `dev:worker:verification` 显式启用 `launch + auto`。Compose 的 API 通过 Xvfb 虚拟桌面运行有头 Chrome，并持久化 `/app/browser_data`。当前仅支持 `disabled|launch`，不支持 `connect` 或连接日常 Chrome；自动模式的 QR/IM 调用不会回退到可见人工窗口。失败后的人工恢复方式是在闲鱼页面完成验证，再回写最新完整 Cookie。完整说明见 [滑块验证说明](docs/17-xianyu-slider-solver.md)。
+- [自动回复 Agent 设计](docs/agent/auto-reply/design.md)
+- [模型主备切换](docs/model-provider-failover-v2.md)
+- [Workspace 业务能力与权限边界](docs/agent/workspace/WS-VS-05-platform-takeover.md)
+- [邀请码注册与用户隔离](docs/invite-registration/PLAN.md)
+- [密码登录与授权恢复](docs/operations/password-login-investigation-20261105.md)
+- [自动化交付运维](docs/automation/delivery-cutover-runbook.md)
+- [记录保留与清理](docs/operations/record-retention.md)
+- [项目经验与回归约束](docs/PROJECT_LESSONS.md)
+- [项目协作与 Git 规则](AGENTS.md)
