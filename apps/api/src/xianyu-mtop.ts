@@ -15,7 +15,7 @@ import {
   XIANYU_TOP_SITE,
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
-import { XIANYU_USER_AGENT, xianyuSecChUa, xianyuSecChUaPlatform } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuSecChUa, xianyuSecChUaPlatform, xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 import { createVerificationReadRequest, resolveVerificationReadRequest, type XianyuReadRequest } from './xianyu-verification-request.js';
 import { inspectXianyuVerification } from './xianyu-verification-response.js';
 
@@ -514,6 +514,7 @@ export class XianyuMtopClient {
     const recoveryRequest = createVerificationReadRequest(api, version, data, extraParams, requestOptions.referer);
     const loadedCredential = await this.loadCredential(adminId, accountId);
     const credential = loadedCredential && structuredClone(loadedCredential);
+    const sessionUserAgent=xianyuSessionUserAgent(credential?.metadata?.loginMethod==='password_http'?credential.metadata.loginUserAgent:undefined);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
     let cookieSnapshot: XianyuCookieSnapshot | undefined = cookieSnapshotFromMetadata(credential?.metadata);
@@ -584,10 +585,10 @@ export class XianyuMtopClient {
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-site',
-          'sec-ch-ua': xianyuSecChUa(),
+          'sec-ch-ua': xianyuSecChUa(sessionUserAgent),
           'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': xianyuSecChUaPlatform(),
-          'user-agent': USER_AGENT,
+          'sec-ch-ua-platform': xianyuSecChUaPlatform(sessionUserAgent),
+          'user-agent': sessionUserAgent,
           cookie: requestCookieHeader,
         };
         const response = await fetch(`${requestUrl}?${params.toString()}`, {

@@ -68,7 +68,7 @@ export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose,
           {close.confirmation}
           {method === 'qr' && <QrLoginView model={qrController.model} onCancel={() => void qrController.cancel()} />}
           {method === 'cookie' && <CookieLoginForm api={api} existingAccountId={account?.id} onCompleted={onCompleted} />}
-          {method === 'password' && <PasswordLoginForm api={api} onCompleted={onCompleted} />}
+          {method === 'password' && <PasswordLoginForm api={api} existingAccountId={account?.id} onCompleted={onCompleted} onClose={onClose} />}
         </div>
       </section>
     </div>

@@ -253,9 +253,14 @@ export class MemoryStore implements Store {
     const account = [...this.accounts.values()].find((item) => item.platform === input.platform && item.sellerRef === input.sellerRef);
     return account ? this.getAccountForLogin(input.adminId, account.id) : undefined;
   }
-  async restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
+  async restoreAccountForLogin(adminId: string, accountId: string, guard?: { generation: number; allowDisabled: boolean; requireManage: boolean }): Promise<AccountRecord | undefined> {
     const account = await this.getAccountForLogin(adminId, accountId);
     if (!account) return undefined;
+    if (guard) {
+      if ((account.credentialGeneration ?? 1) !== guard.generation) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
+      if (!guard.allowDisabled && account.status === 'disabled') throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+      if (guard.requireManage && !(await this.listScopes(adminId)).some(s => s.accountId === accountId && s.scope === 'manage')) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    }
     await this.grantScope({ adminId, accountId, scope: 'manage' });
     if (account.status === 'disabled') account.status = 'pending';
     account.updatedAt = new Date().toISOString();
@@ -1713,6 +1718,19 @@ export class MemoryStore implements Store {
     Object.assign(session, patch);
     return session;
   }
+  async completePasswordLogin(input: { adminId: string; accountId: string; sessionId: string; generation: number; leaseOwner: string }): Promise<boolean> {
+    // No awaits: these checks and the terminal transition are one atomic memory-store operation.
+    const now = Date.now(), session = this.loginSessions.get(input.sessionId), account = this.accounts.get(input.accountId);
+    const actor = this.admins.get(input.adminId), credential = this.credentials.get(input.accountId);
+    const invite = [...this.invites.values()].find(i => i.usedBy === input.adminId && i.usedAt);
+    if (!actor || actor.status !== 'active' || actor.role !== 'admin' && (!invite || inviteAccessStatus(invite, now) !== 'active')
+      || !session || session.adminId !== input.adminId || session.loginMethod !== 'password' || Date.parse(session.expiresAt) <= now
+      || ['failed','cancelled','expired','succeeded'].includes(session.status) || !account || account.status === 'disabled' || this.deletionRequested.has(account.id)
+      || (account.credentialGeneration ?? 1) !== input.generation || credential?.generation !== input.generation || credential.status !== 'active'
+      || ![...this.scopes.values()].some(s => s.adminId === input.adminId && s.accountId === account.id && s.scope === 'manage' && s.status === 'active' && (!s.expiresAt || Date.parse(s.expiresAt) > now))) return false;
+    Object.assign(session, { accountId: account.id, status: 'succeeded', completedAt: new Date(now).toISOString(), failureCode: undefined });
+    return true;
+  }
   async getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
     if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
     const credential = this.credentials.get(accountId);
@@ -1735,13 +1753,14 @@ export class MemoryStore implements Store {
     const next = { loginSessionId: input.loginSessionId, reservationId: createId(), generation, until: Date.now() + 300_000 };
     this.credentialLoginClaims.set(input.accountId, next); return next;
   }
-  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord> {
+  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; expectedGeneration?: number; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const account = this.accounts.get(input.accountId)!;
     if (!(await this.listScopes(input.adminId)).some(scope => scope.accountId === input.accountId && scope.scope === 'manage'
       && (!scope.expiresAt || Date.parse(scope.expiresAt) > Date.now()))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     if (this.deletionRequested.has(input.accountId)) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const claim = this.credentialLoginClaims.get(input.accountId);
+    if (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
     let generation: number;
     if (input.loginReservation) {
       const r = input.loginReservation, login = this.loginSessions.get(r.loginSessionId);

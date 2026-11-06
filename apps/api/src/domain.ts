@@ -1465,7 +1465,8 @@ export interface Store {
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined>;
-  restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
+  restoreAccountForLogin(adminId: string, accountId: string, guard?: { generation: number; allowDisabled: boolean; requireManage: boolean }): Promise<AccountRecord | undefined>;
+  completePasswordLogin(input: { adminId: string; accountId: string; sessionId: string; generation: number; leaseOwner: string }): Promise<boolean>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
   recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest; expectedGeneration?: number }): Promise<AccountRecord | undefined>;
@@ -1485,7 +1486,7 @@ export interface Store {
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   updateLoginSession(adminId: string, accountId: string | undefined, sessionId: string, patch: { accountId?: string; status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
   getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
-  upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord>;
+  upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; expectedGeneration?: number; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord>;
   beginCredentialLogin(input: { adminId: string; accountId: string; loginSessionId: string }): Promise<{ reservationId: string; generation: number }>;
   commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined>;
   revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;

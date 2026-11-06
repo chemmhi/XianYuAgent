@@ -61,6 +61,15 @@ import { classifyXianyuFailure } from './xianyu-account-health.js';
 import { PiSkillManager, PiSkillError } from './pi-skills.js';
 import { PaymentEventWorker } from './payment-event-worker.js';
 import { extractTrustedOrderNo, isTrustedPaidEvent, trustedPaymentOccurredAt } from './payment-event-parser.js';
+import { PasswordLoginService } from './password-login.js';
+import { PasswordReloginWorker } from './password-relogin-worker.js';
+import { PasswordLoginVault } from './password-login-vault.js';
+import { MemoryPasswordLoginRepository, type PasswordLoginRepository } from './password-login-repository.js';
+import { PostgresPasswordLoginRepository } from './password-login-postgres.js';
+import { PostgresStore } from './store-postgres.js';
+import type { PasswordLoginTransport } from './password-login-port.js';
+import { XianyuPasswordHttp } from './xianyu-password-http.js';
+import {OfficialPasswordDeviceFactory} from './password-device-sdk.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -104,6 +113,8 @@ export interface AppRuntime {
   verification?: VerificationRuntime;
   verificationRealtime?: VerificationRealtime;
   verificationBrowser?: XianyuVerificationBrowser;
+  passwordLogin: PasswordLoginService;
+  passwordRelogin: PasswordReloginWorker;
   server: Server;
   listen(): Promise<void>;
   close(): Promise<void>;
@@ -116,6 +127,8 @@ export interface CreateAppOptions {
   autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   verificationRecoveryOwner?: boolean;
   imOwnerUrl?: string;
+  passwordTransport?: PasswordLoginTransport;
+  passwordRepository?: PasswordLoginRepository;
 }
 
 export function createApp(config: AppConfig = loadConfig(), options: CreateAppOptions = {}): AppRuntime {
@@ -138,6 +151,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, async (resources) => {
+    await passwordLogin.forgetAccount(resources.accountId);
     qrLogin.forgetSessions(resources.loginSessionIds);
     await verification?.cancel(resources.accountId);
     for (const id of resources.loginSessionIds) await verification?.cancel(id);
@@ -490,6 +504,18 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
   }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient, options.imClientFactory);
   const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(imOwnerSecret, xianyuIm, store);
+  const passwordOwner = options.verificationRecoveryOwner !== false && !imOwnerClient;
+  const passwordLogin = new PasswordLoginService(store, auth, accounts, credentials,
+    new PasswordLoginVault(options.passwordRepository ?? (store instanceof PostgresStore
+      ? new PostgresPasswordLoginRepository(store.pool) : new MemoryPasswordLoginRepository()), config.credentialEncryptionKey),
+    options.passwordTransport ?? new XianyuPasswordHttp({deviceFactory:new OfficialPasswordDeviceFactory({root:config.xianyuVerificationBrowserUserDataDir,executablePath:config.xianyuVerificationBrowserExecutablePath})}), {
+      enabled: passwordOwner && config.xianyuPasswordLoginEnabled !== false && (config.xianyuQrMode === 'real' || !!options.passwordTransport),
+      hydrate: (adminId, accountId, unb) => hydrateAccountProfile({ accounts, xianyu, adminId, accountId, fallbackSellerRef: unb, requestId: 'password-login', traceId: 'password-login' }),
+      connected: async (adminId, accountId) => { await xianyuIm.resetClient(adminId, accountId); await startXianyuListenerBestEffort(runtime, adminId, accountId); },
+    });
+  const passwordRelogin = new PasswordReloginWorker(store, auth, passwordLogin,
+    (adminId, accountId) => xianyu.verifyLogin(adminId, accountId),
+    async (adminId, accountId) => { await xianyuIm.resetClient(adminId, accountId); await startXianyuListenerBestEffort(runtime, adminId, accountId); });
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,
@@ -545,15 +571,18 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
     config, store, auth, invites, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
-    server, verification, verificationRealtime, verificationBrowser,
+    server, verification, verificationRealtime, verificationBrowser, passwordLogin, passwordRelogin,
     async listen() {
       await verification?.coordinator.start();
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
       if (verificationBrowser?.enabled) verificationRecoveryBridge?.startConsumer(() => startAllRecoverableListenersBestEffort(runtime));
       await bootstrapRepairPoliciesBestEffort(runtime);
       if (config.xianyuQrMode === 'real') void startAllRecoverableListenersBestEffort(runtime);
+      if (passwordOwner && config.xianyuPasswordLoginEnabled !== false && config.xianyuQrMode === 'real') passwordRelogin.start();
     },
     async close() {
+      await passwordLogin.close();
+      await passwordRelogin.stop();
       await verificationRealtime?.close();
       await verification?.close();
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
@@ -1262,8 +1291,35 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return result;
   }
   if (ctx.path === '/api/v1/accounts/password-login' && ctx.method === 'POST') {
-    if (!optionalString(ctx.body.account) || !optionalString(ctx.body.password)) throw new ServiceError(422, 'VALIDATION_FAILED', 'account and password are required');
-    throw new ServiceError(501, 'PASSWORD_LOGIN_UNAVAILABLE', '闲鱼账号密码登录需要独立浏览器运行时，当前版本仅开放扫码和 Cookie 登录');
+    return mutation(runtime, ctx, authContext, optionalString(ctx.body.accountId), async () => {
+      const session = await runtime.passwordLogin.create(authContext.admin.id, { account: typeof ctx.body.account === 'string' ? ctx.body.account : '',
+        password: typeof ctx.body.password === 'string' ? ctx.body.password : '', accountId: optionalString(ctx.body.accountId), acceptTerms: ctx.body.acceptTerms === true,clientInfo:ctx.body.clientInfo as import('./password-login-client.js').PasswordClientInfo|undefined });
+      return success(ctx, { session }, 202);
+    });
+  }
+  const savedPasswordMatch=ctx.path.match(/^\/api\/v1\/accounts\/([0-9a-f-]+)\/password-login\/(saved|retry)$/i);
+  if(savedPasswordMatch){
+    const accountId=savedPasswordMatch[1];
+    if(savedPasswordMatch[2]==='saved'&&ctx.method==='GET')return success(ctx,{available:await runtime.passwordLogin.savedAvailable(authContext.admin.id,accountId)});
+    if(savedPasswordMatch[2]==='retry'&&ctx.method==='POST')return mutation(runtime,ctx,authContext,accountId,async()=>{
+      const presenterId=optionalString(ctx.body.presenterId);if(!presenterId||!/^[0-9a-f-]{36}$/i.test(presenterId))throw new ServiceError(422,'PASSWORD_CLIENT_INVALID','验证窗口标识无效');
+      return success(ctx,{session:await runtime.passwordLogin.retrySaved(authContext.admin.id,accountId,presenterId)},202);
+    });
+  }
+  if(ctx.path==='/api/v1/accounts/password-login/pending'&&ctx.method==='GET'){
+    const presenterId=optionalString(ctx.query.presenterId);if(!presenterId||!/^[0-9a-f-]{36}$/i.test(presenterId))throw new ServiceError(422,'PASSWORD_CLIENT_INVALID','验证窗口标识无效');
+    return success(ctx,{session:await runtime.passwordLogin.pending(authContext.admin.id,presenterId)});
+  }
+  const passwordSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/password-login\/([^/]+)(?:\/(cancel|verification))?$/);
+  if (passwordSessionMatch) {
+    const id = decodeURIComponent(passwordSessionMatch[1]);
+    if (!passwordSessionMatch[2] && ctx.method === 'GET') return success(ctx, { session: await runtime.passwordLogin.get(authContext.admin.id, id,optionalString(ctx.query.presenterId)) });
+    if (passwordSessionMatch[2]==='verification' && ctx.method==='POST')return mutation(runtime,ctx,authContext,undefined,async()=>{
+      await runtime.passwordLogin.submitVerification(authContext.admin.id,id,String(ctx.body.challengeId??''),ctx.body.candidate,optionalString(ctx.body.presenterId));return success(ctx,{submitted:true},202);
+    });
+    if (passwordSessionMatch[2]==='cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => {
+      await runtime.passwordLogin.cancel(authContext.admin.id, id); return success(ctx, { cancelled: true });
+    });
   }
 
   const credentialMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/credential(?:\/(verify|revoke))?$/);

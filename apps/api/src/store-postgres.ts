@@ -262,12 +262,32 @@ export class PostgresStore implements Store {
   async getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status=\'active\' and a.status<>\'disabled\' and (s.expires_at is null or s.expires_at>now())', [accountId, adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
   async getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' and a.deletion_started_at is null limit 1', [accountId, adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
   async findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.platform=$1 and a.seller_ref=$2 and s.admin_id=$3 and s.scope=\'manage\' and a.deletion_started_at is null limit 1', [input.platform, input.sellerRef, input.adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
-  async restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
+  async completePasswordLogin(input: { adminId: string; accountId: string; sessionId: string; generation: number; leaseOwner: string }): Promise<boolean> {
+    const result = await this.pool.query(`update auth.account_login_sessions l set account_id=$2,status='succeeded',completed_at=now(),failure_code=null
+      where l.id=$3 and l.admin_id=$1 and l.login_method='password' and l.expires_at>now() and l.status in ('created','waiting','verification_required','scanned')
+      and exists(select 1 from accounts.accounts a join auth.account_credentials c on c.account_id=a.id
+        join auth.account_scopes s on s.account_id=a.id join auth.admins actor on actor.id=s.admin_id
+        join auth.password_login_leases lease on lease.account_id=a.id
+        where a.id=$2 and a.status<>'disabled' and a.deletion_started_at is null and a.credential_generation=$4
+        and c.generation=$4 and c.status='active' and (c.expires_at is null or c.expires_at>now())
+        and s.admin_id=$1 and s.scope='manage' and s.status='active' and (s.expires_at is null or s.expires_at>now())
+        and lease.owner=$5 and lease.expires_at>now() and actor.status='active'
+        and (actor.role='admin' or exists(select 1 from auth.registration_invites i where i.used_by=actor.id and i.used_at is not null
+          and i.expires_at>now() and i.revoked_at is null and i.disabled_at is null and i.deleted_at is null)))`,
+      [input.adminId, input.accountId, input.sessionId, input.generation, input.leaseOwner]);
+    return result.rowCount === 1;
+  }
+  async restoreAccountForLogin(adminId: string, accountId: string, guard?: { generation: number; allowDisabled: boolean; requireManage: boolean }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const current = await client.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' and a.deletion_started_at is null limit 1 for update', [accountId, adminId]);
       if (!current.rows[0]) { await client.query('rollback'); return undefined; }
+        if (guard) {
+          if (Number(current.rows[0].credential_generation) !== guard.generation) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
+          if (!guard.allowDisabled && current.rows[0].status === 'disabled') throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+          if (guard.requireManage && !(await client.query("select 1 from auth.account_scopes where account_id=$1 and admin_id=$2 and scope='manage' and status='active' and (expires_at is null or expires_at>now())", [accountId, adminId])).rowCount) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+        }
       await client.query('insert into auth.account_scopes (id,admin_id,account_id,scope,status) values ($1,$2,$3,\'manage\',\'active\') on conflict (admin_id,account_id,scope) do update set status=\'active\', revoked_at=null, expires_at=null', [createId(), adminId, accountId]);
       const result = await client.query("update accounts.accounts set status=case when status='disabled' then 'pending' else status end, updated_at=now() where id=$1 returning *", [accountId]);
       await client.query('commit');

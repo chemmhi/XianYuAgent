@@ -3,6 +3,46 @@ import assert from 'node:assert/strict';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 import { ServiceError } from '../src/services.js';
 import { XianyuImClient } from '../src/xianyu-im.js';
+import { MemoryStore } from '../src/store-memory.js';
+
+it('superseded IM reads preserve the current account health and still reject the old operation', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'superseded-im@example.test', passwordHash: 'fixture', displayName: 'fixture' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'fixture' });
+  await store.updateAccount(admin.id, account.id, { status: 'connected' });
+  const service = new XianyuImService(store, {} as never, {} as never);
+  const client = {
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    listConversations: async () => { throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化'); },
+  };
+  (service as unknown as { clients: Map<string, unknown> }).clients.set(`${admin.id}:${account.id}`, client);
+  try {
+    const before = await store.getAccount(admin.id, account.id);
+    await assert.rejects(service.listConversations(admin.id, account.id), (error: unknown) =>
+      error instanceof ServiceError && error.code === 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
+    const after = await store.getAccount(admin.id, account.id);
+    assert.equal(after?.status, before?.status);
+    assert.equal(after?.degradedSource, undefined);
+    assert.equal(after?.riskEpisode, undefined);
+    // A genuine failure must still affect health; the exemption is exact.
+    client.listConversations = async () => { throw new ServiceError(503, 'XIANYU_IM_REQUEST_FAILED', 'fixture failure'); };
+    await assert.rejects(service.listConversations(admin.id, account.id));
+    assert.equal((await store.getAccount(admin.id, account.id))?.degradedSource, 'im_read');
+  } finally { await service.close(); }
+});
+
+it('IM bootstrap uses the saved UA only while the active authentication method is password HTTP',async()=>{
+  const store=new MemoryStore(),admin=await store.createAdmin({email:'ua-switch@example.test',passwordHash:'fixture',displayName:'fixture'});
+  const account=await store.createAccount({adminId:admin.id,platform:'xianyu',sellerRef:'fixture'});
+  for(const loginMethod of ['password_http','qr_http','cookie']){
+    await store.upsertCredential({adminId:admin.id,accountId:account.id,platform:'xianyu',cookieHeader:'unb=fixture',accessToken:'fixture-token',metadata:{loginMethod,loginUserAgent:'fixture-password-ua'}});
+    let receivedUa:string|undefined;
+    const service=new XianyuImService(store,{} as never,{} as never,undefined,undefined,undefined,undefined,undefined,undefined,options=>{receivedUa=options.credential.userAgent;throw new Error('FIXTURE_STOP_AFTER_CREDENTIAL');});
+    try{await assert.rejects((service as unknown as {ensureClient(adminId:string,accountId:string):Promise<unknown>}).ensureClient(admin.id,account.id),/FIXTURE_STOP_AFTER_CREDENTIAL/);assert.equal(receivedUa,loginMethod==='password_http'?'fixture-password-ua':undefined);}
+    finally{await service.close();}
+  }
+});
 
 describe('xianyu IM credential refresh', () => {
   it('preserves the browser cookie snapshot while saving refreshed IM credentials', async () => {
