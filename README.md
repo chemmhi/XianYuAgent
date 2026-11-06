@@ -172,21 +172,25 @@ npm run compose:down
 
 ## 生产部署
 
-生产代码从 GitHub `origin/main` 获取。变更先在功能分支完成检查，再在本地合入 `main`，最后推送；不要从功能分支直接推送到远程 `main`。
+生产代码从 GitHub `origin/main` 获取。所有变更先在功能分支完成检查、推送并创建 Pull Request（PR），再通过 GitHub 合入受保护的 `main`。禁止直接推送 main，也不再使用本地合并后推送的方式。
 
 ```powershell
-# 在已确认干净的本地 main 工作区执行
-# codex/<功能分支> 替换为已完成验证的实际分支名
+# 在功能分支执行；名称替换为实际分支名
+git push -u origin codex/<功能分支>
+```
 
+在 GitHub 创建以 `main` 为目标的 PR，完成检查与审核后合并。然后在干净的本地 main 工作区同步：
+
+```powershell
+git fetch origin
 git switch main
-git merge --no-ff codex/<功能分支>
-git push origin main
+git pull --ff-only origin main
 ```
 
 当前仓库的 `main` 推送会触发 [生产部署工作流](.github/workflows/deploy-production.yml)，服务器拉取同一 SHA 后执行 [统一部署脚本](scripts/deploy-production.sh)：
 
 ```text
-本地合入 main 并推送 GitHub
+推送功能分支 → 创建 PR → 通过 GitHub 合入 main
   → GitHub Actions 校验部署配置与 SSH 主机指纹
   → 服务器 fetch / pull --ff-only，并核对提交 SHA
   → 构建前端与后端镜像，执行数据库迁移，重建 API / Worker
@@ -208,3 +212,13 @@ git push origin main
 - [记录保留与清理](docs/operations/record-retention.md)
 - [项目经验与回归约束](docs/PROJECT_LESSONS.md)
 - [项目协作与 Git 规则](AGENTS.md)
+
+## 许可证
+
+FishAgent 采用 **GNU Affero General Public License v3.0（AGPL-3.0-only）** 发布，完整条款见 [LICENSE](LICENSE)。
+
+第三方组件保留各自的版权及许可声明，参见 [第三方声明](apps/api/THIRD_PARTY_NOTICES.md)。仓库中的 Ydisks 适配保留其上游来源和 AGPL-3.0 许可文本。
+
+## 版本与分支
+
+首个版本标签为 `v0.1.0`，采用带说明的 Git tag。`main` 为默认交付分支，所有变更必须通过 PR 合入，禁止直接推送、强制推送和删除，管理员同样受保护。仅为该分支上的已合并提交创建正式版本 tag。
