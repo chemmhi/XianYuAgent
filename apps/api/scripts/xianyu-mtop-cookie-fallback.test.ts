@@ -5,6 +5,16 @@ import { XianyuMtopClient } from '../src/xianyu-mtop.js';
 import { CredentialService } from '../src/services.js';
 import { MemoryStore } from '../src/store-memory.js';
 import { cookieSnapshotFromMetadata } from '../src/xianyu-cookie-jar.js';
+import { XIANYU_USER_AGENT } from '../src/xianyu-browser-identity.js';
+
+test('password to QR/Cookie authentication switches stop reusing the old password device UA',async()=>{
+  const originalFetch=globalThis.fetch, savedUa='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36';
+  let loginMethod='password_http',receivedUa='';
+  globalThis.fetch=async(_url,init)=>{receivedUa=new Headers(init?.headers).get('user-agent')??'';return new Response(JSON.stringify({ret:['SUCCESS::OK'],data:{accessToken:'fixture-token'}}));};
+  const client=new XianyuMtopClient({loadCredential:async()=>({cookieHeader:'unb=fixture; _m_h5_tk=fixture_9999999999999',metadata:{loginMethod,loginUserAgent:savedUa}}),saveCookie:async()=>undefined});
+  try{for(const method of ['password_http','qr_http','cookie']){loginMethod=method;await client.fetchImToken('admin','account','device');assert.equal(receivedUa,method==='password_http'?savedUa:XIANYU_USER_AGENT);}}
+  finally{globalThis.fetch=originalFetch;}
+});
 
 test('risk persistence failure is surfaced instead of returning a stale healthy account result', async () => {
   const originalFetch = globalThis.fetch;

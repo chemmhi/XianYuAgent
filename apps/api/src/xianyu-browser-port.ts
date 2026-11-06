@@ -49,6 +49,7 @@ export interface XianyuVerificationLaunchOptions {
   executablePath?: string;
   userAgent?: string;
   sliderStrategy?: 'ydisks';
+  serviceWorkers?:'block';
 }
 
 export interface XianyuVerificationBrowserFactory {

@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { createAccountsApi, createMockAccountsApi } from './api';
 
 describe('accounts canonical API adapter', () => {
+  it('uses one presenter identity across background discovery, polling and native verification',async()=>{
+    const paths:string[]=[],bodies:unknown[]=[];
+    const api=createAccountsApi({async get<T>(path:string){paths.push(path);return {session:path.includes('/pending?')?null:{id:'automatic',status:'verification_required'}} as T;},async post<T>(_path:string,body:unknown){bodies.push(body);return {} as T;}});
+    expect(await api.getPendingPasswordSession!()).toBeNull();await api.getPasswordSession!('automatic');
+    const presenter=new URL('http://fixture'+paths[0]).searchParams.get('presenterId');expect(presenter).toMatch(/^[0-9a-f-]{36}$/);expect(paths[1]).toBe('/api/v1/accounts/password-login/automatic?presenterId='+presenter);
+    await api.submitPasswordVerification!('automatic',{challengeId:'nonce',candidate:{value:'proof',expire:123,host:'passport.goofish.com'}});expect(bodies[0]).toMatchObject({presenterId:presenter,challengeId:'nonce'});
+  });
+  it('uses async password sessions, keeps secrets on the initial POST, and maps the successful account', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const api = createAccountsApi({ async post<T>(path: string, body: unknown) { posts.push({ path, body }); return { session: { id: 'password-session', status: 'logging_in', expiresAt: '2030-01-01T00:00:00Z' } } as T; },
+      async get<T>(path: string) { expect(path).toMatch(/^\/api\/v1\/accounts\/password-login\/password-session\?presenterId=[0-9a-f-]{36}$/); return { success: true, data: { session: { id: 'password-session', status: 'succeeded', credentialsSaved: true, account: { id: 'restored', displayName: '恢复账号', status: 'disconnected' } } } } as T; } });
+    const input = { account: 'fixture-user', password: 'fixture-password', accountId: 'restored', acceptTerms: true };
+    expect((await api.createPasswordSession!(input)).id).toBe('password-session'); expect(posts[0]).toEqual({ path:'/api/v1/accounts/password-login', body:input });
+    const result = await api.getPasswordSession!('password-session'); expect(result.account?.id).toBe('restored'); expect(result.credentialsSaved).toBe(true);
+    await api.cancelPasswordSession!('password-session'); expect(posts[1]).toEqual({ path:'/api/v1/accounts/password-login/password-session/cancel',body:{} });
+  });
   it('uses the settings-backed boolean, preserves false, and does not interpret unavailable as off', async () => {
     const api = createAccountsApi({ async get<T>() { return { items: [
       { id: 'on', displayName: '已开启', autoReplyEnabled: true, aiEnabled: false, degradedSource: 'im' },

@@ -21,6 +21,9 @@ const DEFAULT_XIANYU_USER_AGENT = process.platform === 'linux'
   : `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${DEFAULT_CHROME_VERSION} Safari/537.36`;
 
 export const XIANYU_USER_AGENT = process.env.XIANYU_BROWSER_USER_AGENT?.trim() || DEFAULT_XIANYU_USER_AGENT;
+export function xianyuSessionUserAgent(value?: string): string {
+  return typeof value==='string'&&value.length>0&&value.length<=512&&!/[\r\n]/.test(value)?value:XIANYU_USER_AGENT;
+}
 
 /**
  * Keep request headers and the verification browser on the same Chrome build.

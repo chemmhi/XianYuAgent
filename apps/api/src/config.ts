@@ -22,6 +22,7 @@ export interface AppConfig {
   sessionIdleMs: number;
   sessionAbsoluteMs: number;
   xianyuQrMode: 'real' | 'stub';
+  xianyuPasswordLoginEnabled?: boolean;
   xianyuVerificationBrowserMode: XianyuVerificationBrowserMode;
   xianyuVerificationSliderMode: XianyuSliderMode;
   xianyuVerificationSliderMaxRetries: number;
@@ -106,6 +107,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionIdleMs: Number(env.SESSION_IDLE_MINUTES ?? 30) * 60_000,
     sessionAbsoluteMs: Number(env.SESSION_ABSOLUTE_HOURS ?? 8) * 3_600_000,
     xianyuQrMode: env.XIANYU_QR_MODE === 'stub' ? 'stub' : 'real',
+    xianyuPasswordLoginEnabled: asBoolean(env.XIANYU_PASSWORD_LOGIN_ENABLED, true),
     xianyuVerificationBrowserMode: normalizeVerificationBrowserMode(env.XIANYU_VERIFICATION_BROWSER_MODE),
     xianyuVerificationSliderMode: normalizeVerificationSliderMode(env.XIANYU_VERIFICATION_SLIDER_MODE),
     xianyuVerificationSliderMaxRetries: positiveInteger(env.XIANYU_VERIFICATION_SLIDER_MAX_RETRIES, 3),

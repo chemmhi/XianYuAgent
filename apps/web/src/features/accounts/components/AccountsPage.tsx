@@ -8,6 +8,7 @@ import { AccountTable } from './AccountTable';
 import { AccountStateView } from './AccountStateView';
 import { AccountToolbar } from './AccountToolbar';
 import { AccountLoginModal } from './AccountLoginModal';
+import { PasswordRecoveryHost } from './PasswordRecoveryHost';
 import { AccountDeleteModal } from './AccountDeleteModal';
 import { CurrentAccountCard } from './CurrentAccountCard';
 import type { AccountLoginMethod } from './LoginMethodSelector';
@@ -108,6 +109,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
 
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
+      <PasswordRecoveryHost api={api} paused={loginOpen||!!deleteAccountTarget} onChanged={()=>{void controller.reload();void refreshAccounts();}}/>
       <div className="kpi-grid three accounts-domain-kpis">
         <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个消息已连接</span><small>当前列表</small></div></article>
         <CurrentAccountCard account={selectedAccount} />

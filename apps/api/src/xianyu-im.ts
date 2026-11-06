@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
-import { XIANYU_USER_AGENT, xianyuImUserAgent } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuImUserAgent, xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 import { hasXianyuStructuredSystemMarker, hasXianyuSystemEnvelopeMarker, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
@@ -17,6 +17,7 @@ export interface XianyuImCredential {
   cookieHeader: string;
   accessToken?: string;
   deviceId?: string;
+  userAgent?: string;
 }
 
 export interface XianyuImConversationPage {
@@ -338,7 +339,7 @@ export class XianyuImClient {
               'cache-header': 'app-key token ua wv',
               'app-key': XIANYU_IM_APP_ID,
               token: decodeURIComponent(this.credential.accessToken ?? ''),
-              ua: xianyuImUserAgent(),
+              ua: xianyuImUserAgent(xianyuSessionUserAgent(this.credential.userAgent)),
               dt: 'j',
               wv: 'im:3,au:3,sy:6',
               sync: '0,0;0;0;',
@@ -397,7 +398,7 @@ export class XianyuImClient {
       headers: {
         Cookie: this.credential.cookieHeader,
         Origin: 'https://www.goofish.com',
-        'User-Agent': USER_AGENT,
+        'User-Agent': xianyuSessionUserAgent(this.credential.userAgent),
       },
     });
     this.socket = socket;
@@ -490,7 +491,7 @@ export class XianyuImClient {
     const response = await this.fetchImpl(`https://h5api.m.goofish.com/h5/${XIANYU_IM_TOKEN_API}/1.0/?${params.toString()}`, {
       method: 'POST', headers: {
         accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', origin: 'https://www.goofish.com',
-        referer: 'https://www.goofish.com/', 'user-agent': USER_AGENT, cookie: this.credential.cookieHeader,
+        referer: 'https://www.goofish.com/', 'user-agent': xianyuSessionUserAgent(this.credential.userAgent), cookie: this.credential.cookieHeader,
       }, body: new URLSearchParams({ data }).toString(), signal: AbortSignal.timeout(this.timeoutMs),
     });
     const payload = await response.json() as Record<string, unknown>;

@@ -389,6 +389,7 @@ export class XianyuImService {
       if (!account || account.status === 'disabled' || (!account.riskEpisode && account.status !== 'verification_required')) return;
       const credential = await this.store.getCredential(adminId, accountId);
       if (this.closed || credential?.status !== 'active' || !credential.cookieHeader) return;
+      if(credential.metadata?.loginMethod==='password_http')return;
       for (const risk of await this.store.listAccountVerificationRisks(adminId, accountId)) attemptedRevisions.set(risk.source, risk.revision);
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
       // A prior browser recovery may already have restored this API. Recheck
@@ -776,7 +777,7 @@ export class XianyuImService {
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
     let token = await tokenClient.fetchImToken(adminId, account.id, deviceId);
     if (!token.success || !token.accessToken) {
-      if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
+      if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && credential.metadata?.loginMethod!=='password_http' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = initial;
         recoveryRisks = await this.store.listAccountVerificationRisks(adminId, account.id);
         const nativeRecoveryStartedAt = new Date().toISOString();
@@ -994,6 +995,9 @@ export class XianyuImService {
       if (!account || account.status === 'disabled' || (expectedGeneration !== undefined && account.credentialGeneration !== expectedGeneration)) return;
       const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
       const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
+      // A local credential fence stops an obsolete task after reauthorization;
+      // it provides no evidence that the replacement session is unhealthy.
+      if (normalizedCode === 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED') return;
       const classification = classifyXianyuFailure({ errorCode: normalizedCode });
       if (classification.kind === 'verification_required') {
         await this.store.recordAccountRisk({ adminId, accountId, code: normalizedCode.slice(0, 120), source, expectedGeneration });
@@ -1287,7 +1291,7 @@ function hasConversationMetadataPatch(conversation: ConversationRecord, event: X
 }
 
 function toImCredential(credential: CredentialRecord): XianyuImCredential {
-  return { cookieHeader: credential.cookieHeader ?? '', accessToken: credential.accessToken, deviceId: credential.deviceId };
+  return { cookieHeader: credential.cookieHeader ?? '', accessToken: credential.accessToken, deviceId: credential.deviceId,...(credential.metadata?.loginMethod==='password_http'&&credential.metadata.loginUserAgent?{userAgent:credential.metadata.loginUserAgent}:{}) };
 }
 
 function normalizeConversation(value: unknown, myId: string | readonly string[]): { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string } | undefined {

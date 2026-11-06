@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 export interface ExplicitCredentialWrite {
   adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string;
   deviceId?: string; metadata?: Record<string, string>; expiresAt?: string;
+  expectedGeneration?: number;
   loginReservation?: { loginSessionId: string; reservationId: string; generation: number };
 }
 async function lockedAccount(client: PoolClient, adminId: string, accountId: string) {
@@ -35,6 +36,7 @@ export async function writePostgresCredential(pool: Pool, input: ExplicitCredent
   const client = await pool.connect();
   try {
     await client.query('begin'); const account = await lockedAccount(client, input.adminId, input.accountId);
+    if (input.expectedGeneration !== undefined && Number(account.credential_generation) !== input.expectedGeneration) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
     let generation: number;
     if (input.loginReservation) {
       const r = input.loginReservation;

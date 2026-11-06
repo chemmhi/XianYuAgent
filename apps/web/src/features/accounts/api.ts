@@ -29,7 +29,22 @@ export interface AccountsApi {
   renewQrSession?(accountId: string | undefined, qrSessionId: string): Promise<QrLoginSessionVM>;
   cancelQrSession?(accountId: string | undefined, qrSessionId: string): Promise<void>;
   loginWithCookie(input: { cookieHeader: string; accountId?: string }): Promise<AccountVM>;
-  loginWithPassword(input: { account: string; password: string }): Promise<AccountVM>;
+  createPasswordSession?(input: { account: string; password: string; accountId?: string; acceptTerms: boolean; clientInfo?: {userAgent:string;platform:string;language:string;screenPixel:string} }): Promise<PasswordLoginSessionVM>;
+  getPasswordSession?(id: string): Promise<PasswordLoginSessionVM>;
+  getPendingPasswordSession?():Promise<PasswordLoginSessionVM|null>;
+  getSavedPasswordAvailable?(accountId:string):Promise<boolean>;
+  retrySavedPassword?(accountId:string):Promise<PasswordLoginSessionVM>;
+  cancelPasswordSession?(id: string): Promise<void>;
+  submitPasswordVerification?(id:string,input:{challengeId:string;candidate?:{value:string;expire:number;host:string}}):Promise<void>;
+}
+export interface PasswordLoginSessionVM {
+  id: string; status: 'logging_in' | 'verification_required' | 'succeeded' | 'failed' | 'cancelled' | 'expired';
+  expiresAt: string; account?: AccountVM; errorCode?: string; credentialsSaved?: boolean;
+  verificationPresentation?: 'http';
+  verificationChallenge?: {id:string;url:string;origin:string;kind:'native'};
+  verificationQr?:{imageDataUrl:string;status:'waiting'|'verifying'|'auditing'|'rejected';expiresAt:string};
+  automatic?:boolean;
+  accountDisplayName?:string;
 }
 
 interface CanonicalAccountResponse {
@@ -129,6 +144,7 @@ function queryString(filters: AccountListFilters = {}): string {
 }
 
 export function createAccountsApi(transport: AccountsApiTransport): AccountsApi {
+  const presenterId=crypto.randomUUID();
   return {
     async list(filters) { return toCanonicalPage(unwrapEnvelope(await transport.get<CanonicalAccountsPayload | ApiEnvelope<CanonicalAccountsPayload>>(`/api/v1/accounts${queryString(filters)}`))); },
     async listRiskNotifications() { const result = unwrapEnvelope(await transport.get<{ items: Array<{ id: string; accountId: string; eventType: 'verification_required' | 'verification_cleared'; createdAt: string }> } | ApiEnvelope<{ items: Array<{ id: string; accountId: string; eventType: 'verification_required' | 'verification_cleared'; createdAt: string }> }>>('/api/v1/accounts/risk-notifications')); return result.items; },
@@ -142,7 +158,19 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
     async renewQrSession(accountId, qrSessionId) { const post = requirePost(transport); const path = accountId ? `/api/v1/accounts/${encodeURIComponent(accountId)}/login-sessions/${encodeURIComponent(qrSessionId)}/renew` : `/api/v1/auth/qr-sessions/${encodeURIComponent(qrSessionId)}/renew`; return unwrapQrSession(await post<CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>>(path, {}, { headers: { 'Idempotency-Key': `qr-login-renew-${accountId ?? 'onboarding'}-${qrSessionId}-${Date.now()}` } })); },
     async cancelQrSession(accountId, qrSessionId) { const post = requirePost(transport); const path = accountId ? `/api/v1/accounts/${encodeURIComponent(accountId)}/login-sessions/${encodeURIComponent(qrSessionId)}/cancel` : `/api/v1/auth/qr-sessions/${encodeURIComponent(qrSessionId)}/cancel`; await post(path, {}, { headers: { 'Idempotency-Key': `qr-login-cancel-${accountId ?? 'onboarding'}-${qrSessionId}-${Date.now()}` } }); },
     async loginWithCookie(input) { const post = requirePost(transport); const payload = unwrapEnvelope(await post<{ account: CanonicalAccountResponse } | ApiEnvelope<{ account: CanonicalAccountResponse }>>('/api/v1/auth/cookie-login', input, { headers: { 'Idempotency-Key': `cookie-login-${Date.now()}` } })); return toAccountVM(payload.account); },
-    async loginWithPassword(input) { const post = requirePost(transport); const payload = unwrapEnvelope(await post<{ account: CanonicalAccountResponse } | ApiEnvelope<{ account: CanonicalAccountResponse }>>('/api/v1/accounts/password-login', input, { headers: { 'Idempotency-Key': `password-login-${Date.now()}` } })); return toAccountVM(payload.account); },
+    async createPasswordSession(input) {
+      const payload = unwrapEnvelope(await requirePost(transport)<{ session: PasswordLoginSessionVM }>('/api/v1/accounts/password-login', input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }));
+      return payload.session;
+    },
+    async getPasswordSession(id) {
+      const payload = unwrapEnvelope(await transport.get<{ session: PasswordLoginSessionVM & { account?: CanonicalAccountResponse } }>(`/api/v1/accounts/password-login/${encodeURIComponent(id)}?presenterId=${presenterId}`));
+      return { ...payload.session, account: payload.session.account ? toAccountVM(payload.session.account) : undefined };
+    },
+    async cancelPasswordSession(id) { await requirePost(transport)(`/api/v1/accounts/password-login/${encodeURIComponent(id)}/cancel`, {}, { headers: { 'Idempotency-Key': crypto.randomUUID() } }); },
+    async getPendingPasswordSession(){return unwrapEnvelope(await transport.get<{session:PasswordLoginSessionVM|null}>(`/api/v1/accounts/password-login/pending?presenterId=${presenterId}`)).session;},
+    async getSavedPasswordAvailable(accountId){return unwrapEnvelope(await transport.get<{available:boolean}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/saved`)).available;},
+    async retrySavedPassword(accountId){return unwrapEnvelope(await requirePost(transport)<{session:PasswordLoginSessionVM}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/retry`,{presenterId},{headers:{'Idempotency-Key':crypto.randomUUID()}})).session;},
+    async submitPasswordVerification(id,input){await requirePost(transport)(`/api/v1/accounts/password-login/${encodeURIComponent(id)}/verification`,{...input,presenterId},{headers:{'Idempotency-Key':crypto.randomUUID()}});},
   };
 }
 
@@ -178,7 +206,6 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
     async renewQrSession(accountId, qrSessionId) { const previous = qrSessions.get(qrSessionId); if (!previous || (previous.accountId ?? '') !== (accountId ?? '')) throw new Error('qr session not found'); previous.status = 'expired'; return createQrSession(accountId); },
     async cancelQrSession(accountId, qrSessionId) { const session = qrSessions.get(qrSessionId); if (!session || (session.accountId ?? '') !== (accountId ?? '')) throw new Error('qr session not found'); session.status = 'cancelled'; },
     async loginWithCookie() { throw new Error('COOKIE_LOGIN_UNAVAILABLE'); },
-    async loginWithPassword() { throw new Error('PASSWORD_LOGIN_UNAVAILABLE'); },
   };
 }
 
@@ -196,6 +223,5 @@ export function createLegacyAccountsApi(legacyApi: { list(query?: { page?: numbe
     async renewQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
     async cancelQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
     async loginWithCookie() { throw new Error('COOKIE_LOGIN_UNAVAILABLE'); },
-    async loginWithPassword() { throw new Error('PASSWORD_LOGIN_UNAVAILABLE'); },
   };
 }
