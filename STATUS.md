@@ -49,7 +49,7 @@
 
 ## 2026-10-24 会话验证事实审计（文档已整理，生产验收未完成）
 
-- 文档与永久入口：[会话验证事实与交付边界](docs/operations/account-session-audit-20261024.md)、AGENT.md；记录原始证据位置、11 项哈希抽核、112 条采集缺口、历史局部成功和生产验收缺口。
+- 文档与永久入口：[会话验证事实与交付边界](docs/operations/account-session-audit-20261024.md)、AGENTS.md；记录原始证据位置、11 项哈希抽核、112 条采集缺口、历史局部成功和生产验收缺口。
 - 本切片仅文档，基于远程 main 的 76c3b34；不引入历史诊断分支，不执行凭证写回或服务器源码修改。
 - 状态：`READY_FOR_REVIEW`；生产自动挑战验收 `BLOCKED / NOT_IMPLEMENTED_IN_THIS_SLICE`。不把文档校验、既有测试或临时客户端连接当作生产业务验收。
 - 发布约束：所有改动先在本地完成并推送 GitHub；生产仅从 origin/main 经 Actions 和统一部署脚本更新。本文档分支不触发部署。
