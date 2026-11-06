@@ -237,7 +237,7 @@ The persisted plan document has a second, explicit schema: `{version:1,revision:
 
 审计证据按文件/上下文分类，不以单纯字符串命中判定：Planner、Plan contract、strict Runtime、PI system prompt、adapter dispatch、instruction parser、Replay/cache 各自列 allow/deny 与对应测试。
 
-同时更新 `AGENT.md`：任何 agent 不得在 Planner/Runtime/Agent prompt 中硬编码工具、规则、路由、商品/文件名或验收动作；硬约束只能来自工具契约、版本化策略或真实结果；独立审核 agent 必须执行上述上下文审计，命中 Deny 即阻断。
+同时更新 `AGENT.md`（2026-11-06 已统一并入 `AGENTS.md`）：任何 agent 不得在 Planner/Runtime/Agent prompt 中硬编码工具、规则、路由、商品/文件名或验收动作；硬约束只能来自工具契约、版本化策略或真实结果；独立审核 agent 必须执行上述上下文审计，命中 Deny 即阻断。
 
 ## 9. 测试与完整 E2E
 
@@ -313,7 +313,7 @@ The IAB acceptance artifact must archive the URL, DOM snapshots before/after eac
 
 编码前独立 agent 必须 PASS：真实代码依据、契约结构、11+ 工具种子、空计划/失败语义、状态机、E2E SQL/selector/fixture、硬编码上下文审计清单全部闭环。
 
-编码后由另一独立 agent 审核：`git diff`、AGENT.md 规则、Plan/Runtime/adapter 边界、wire 剥离、定向测试、类型/构建、完整 E2E 与证据；未 PASS 不合并。
+编码后由另一独立 agent 审核：`git diff`、AGENTS.md 规则、Plan/Runtime/adapter 边界、wire 剥离、定向测试、类型/构建、完整 E2E 与证据；未 PASS 不合并。
 
 ## 11. 回滚
 
