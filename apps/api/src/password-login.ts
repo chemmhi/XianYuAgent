@@ -15,7 +15,6 @@ export type PasswordLoginStatus = 'logging_in' | 'verification_required' | 'succ
 export interface PasswordLoginSession {
   id: string; status: PasswordLoginStatus; expiresAt: string; account?: AccountRecord;
   errorCode?: string; verificationPresentation?: 'http';
-  verificationUrl?: string;
   verificationChallenge?: { id: string; url: string; origin: string;kind:'native' };
   verificationQr?:PasswordIvStatus;
   automatic?:boolean;
@@ -270,16 +269,16 @@ export class PasswordLoginService {
       if (entry.automatic) await this.vault.repository.settle(entry.automatic, Date.now() + 90_000);
     } catch (error) {
       if (error instanceof PasswordHttpVerificationRequired) {
-        entry.hadVerification=true;entry.public.status='verification_required';entry.public.errorCode='PASSWORD_SECURITY_VERIFICATION_REQUIRED';entry.public.verificationPresentation='http';
-        entry.public.verificationUrl=error.verificationUrl;
-        await this.store.updateLoginSession(entry.adminId,undefined,id,{status:'verification_required',failureCode:'PASSWORD_SECURITY_VERIFICATION_REQUIRED'}).catch(()=>undefined);
-        if(entry.automatic)await this.vault.repository.settle(entry.automatic,Date.now(),'PASSWORD_SECURITY_VERIFICATION_REQUIRED',true).catch(()=>undefined);
-        return;
+        // The transport has exited, so there is no live QR/proof continuation to present.
+        // A waiting status here would strand the user in a dialog with no actionable content.
+        entry.hadVerification=true;
+        error=new Error('PASSWORD_VERIFICATION_UNAVAILABLE');
       }
       const code = leaseLost ? 'PASSWORD_LOGIN_LEASE_LOST' : passwordErrorCode(error, entry);
       if (entry.public.status !== 'succeeded') {
         entry.public.status = entry.public.status === 'cancelled' ? 'cancelled' : code === 'PASSWORD_LOGIN_EXPIRED' ? 'expired' : 'failed';
         entry.public.errorCode = code;
+        delete entry.public.verificationChallenge; delete entry.public.verificationQr; delete entry.public.verificationPresentation;
         await this.store.updateLoginSession(entry.adminId, undefined, id, { status: entry.public.status, failureCode: code, completedAt: new Date().toISOString() }).catch(() => undefined);
         if (savedSecret) await this.vault.repository.settle(savedSecret, Date.now() + 60_000, code, true).catch(() => undefined);
         if (entry.automatic) {

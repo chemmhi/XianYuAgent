@@ -10,6 +10,7 @@ import { PasswordLoginService, type PasswordLoginOptions } from '../src/password
 import { PasswordReloginWorker } from '../src/password-relogin-worker.js';
 import { classifyPasswordLoginResponse, safeChallengeUrl } from '../src/xianyu-password-response.js';
 import type { PasswordLoginTransport, PasswordLoginInput } from '../src/password-login-port.js';
+import { PasswordHttpVerificationRequired } from '../src/xianyu-password-http.js';
 
 const deferred = <T = void>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; };
 async function until<T>(read: () => Promise<T>, check: (value: T) => boolean) {
@@ -58,6 +59,22 @@ test('successful password login revives expired authorization, clears old expiry
     assert.deepEqual(f.vault.open(row), { account: 'fixture-phone', password: 'fixture-password' });
     assert.throws(() => f.vault.open({ ...row, accountId: randomUUID() }), /PASSWORD_SECRET_INVALID/);
   } finally { await f.login.close(); }
+});
+for (const automatic of [false, true]) test(`unavailable verification fails visibly instead of leaving an unresumable waiting session (automatic=${automatic})`,async()=>{
+  const f=await fixture({run:async()=>{throw new PasswordHttpVerificationRequired();}});
+  try {
+    const row=await f.remember();
+    const session=automatic?await f.login.retrySaved(f.admin.id,f.account.id):await f.create();
+    const done=await f.finish(session.id);
+    assert.equal(done.status,'failed');assert.equal(done.errorCode,'PASSWORD_VERIFICATION_UNAVAILABLE');
+    const persisted=await f.store.getLoginSessionById(f.admin.id,session.id);
+    assert.equal(persisted?.status,'failed');assert.ok(persisted?.completedAt);
+    assert.equal((await f.store.getCredential(f.admin.id,f.account.id))?.status,'expired');
+    const secret=(await f.repository.get(f.admin.id,f.account.id))!;
+    assert.equal(secret.ciphertext,row.ciphertext);assert.equal(secret.enabled,!automatic);
+    assert.equal(await f.login.pending(f.admin.id),null);assert.equal(f.connected(),0);
+    assert.equal(await f.repository.claim(f.account.id,randomUUID(),Date.now()+60_000),true);
+  } finally {await f.login.close();}
 });
 test('wrong new password preserves existing credentials, generation and remembered password', async () => {
   const f = await fixture({ run: async () => { throw new Error('PASSWORD_REJECTED'); } });

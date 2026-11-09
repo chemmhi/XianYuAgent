@@ -16,6 +16,7 @@ describe('account feedback translation', () => {
 
   it.each([
     [new Error('ACCOUNT_CONTEXT_INVALID'), '该账号不可用，请刷新列表后重新选择。'],
+    [new Error('PASSWORD_VERIFICATION_UNAVAILABLE'), '闲鱼要求安全验证，但本次未能获取可用的验证页面或二维码。请重试登录，或切换扫码登录。'],
     [new ApiError('raw forbidden', 403), '当前账号没有操作权限。'],
     [new ApiError('raw timeout', 504), '请求超时，请稍后重试。'],
     [new TypeError('fetch failed: private host'), '账号服务暂时不可用，请检查连接后重试。'],
