@@ -77,6 +77,29 @@ try {
   let id=0; const pending=new Map(); socket.onmessage=e=>{const message=JSON.parse(e.data);if(!message.id)return;const call=pending.get(message.id);pending.delete(message.id);message.error?call.reject(new Error(message.error.message)):call.resolve(message.result);};
   const send=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});
   const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description??'browser error');return r.result?.value;};
+  const clickFormButton = async (label) => {
+    const point=await evaluate(`(() => {const b=Array.from(document.querySelectorAll('.account-login-form button')).find(b=>b.textContent===${JSON.stringify(label)});b.scrollIntoView({block:'nearest'});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+    await send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+    await send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+  };
+  const checkLoginLayout = async (prefix, saved = false) => {
+    for (const [width, height] of [[1440,900],[1440,572],[920,572],[858,572],[390,844],[390,572]]) {
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+      const layout = await evaluate(`(() => {
+        const body=document.querySelector('.account-login-body'),modal=document.querySelector('.account-login-modal');
+        const bounds=modal.getBoundingClientRect(),overflow=getComputedStyle(body).overflowY;
+        body.scrollTop=body.scrollHeight;
+        const buttons=[document.querySelector('.account-login-form button[type="submit"]'),...Array.from(document.querySelectorAll('.account-login-form button')).filter(b=>b.textContent==='使用已保存账密登录')];
+        return {inside:bounds.top>=0&&bounds.bottom<=innerHeight,scrollable:body.scrollHeight<=body.clientHeight+1||['auto','scroll'].includes(overflow),buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),p=body.getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom&&r.left>=0&&r.right<=innerWidth&&[r.top+1,r.bottom-1].every(y=>b.contains(document.elementFromPoint(r.x+r.width/2,y)));})};
+      })()`);
+      assert.equal(layout.inside,true,`${prefix} modal fits ${width}x${height}`);
+      assert.equal(layout.scrollable,true,`${prefix} overflowing form can be scrolled ${width}x${height}`);
+      assert.equal(layout.buttons.length,saved?2:1);
+      assert.ok(layout.buttons.every(Boolean),`${prefix} entire buttons are reachable ${width}x${height}: ${JSON.stringify(layout)}`);
+      await writeFile(join(evidence,`${prefix}-${width}x${height}.png`),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    }
+    await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  };
   await send('Network.enable');
   for(const [name,value] of [['session_id',auth.session.id],['csrf_token',auth.csrfToken]])await send('Network.setCookie',{name,value,url:web});
   await send('Page.navigate',{url:web+'/accounts'});
@@ -87,13 +110,14 @@ try {
   await wait(()=>evaluate(`!!document.querySelector('.account-login-form input[type="password"]')`),'password form');
   await evaluate(`(()=>{const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;const inputs=document.querySelectorAll('.account-login-form input');for(const [el,v]of [[inputs[0],'fixture-phone'],[inputs[1],'fixture-password']]){set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('.account-login-form input[type="checkbox"]').click();})()`);
   await mkdir(evidence,{recursive:true});
+  await checkLoginLayout('password-form');
   for(const [width,height,name]of [[1440,900,'password-desktop.png'],[390,844,'password-mobile.png']]){
     await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
     // The field masks a synthetic fixture password; real credentials are never used by this harness.
     await writeFile(join(evidence,name),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
   }
   await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
-  await evaluate(`document.querySelector('.account-login-form button[type="submit"]').click()`);
+  await clickFormButton('登录并添加账号');
   if(verificationMode){
     await wait(()=>evaluate(`!!document.querySelector('.password-verification-dialog img[alt="闲鱼官方人脸验证二维码"]')`),'independent verification dialog');
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.account-modal-backdrop')).display`),'none','password dialog is hidden while its controller remains alive');
@@ -122,7 +146,8 @@ try {
     await evaluate(`document.querySelector('[data-login-method="password"]').click()`);
     const savedStatus=await fetch(apiOrigin+`/api/v1/accounts/${account.id}/password-login/saved`,{headers:{cookie:`session_id=${auth.session.id}; csrf_token=${auth.csrfToken}`}});assert.equal(savedStatus.status,200);assert.equal((await savedStatus.json()).data.available,true);
     await wait(()=>evaluate(`Array.from(document.querySelectorAll('button')).some(el=>el.textContent==='使用已保存账密登录')`),'saved-password retry is offered').catch(async error=>{throw new Error(error.message+'; fixture dialog: '+await evaluate(`document.querySelector('[role="dialog"]')?.innerText`));});
-    await evaluate(`Array.from(document.querySelectorAll('button')).find(el=>el.textContent==='使用已保存账密登录').click()`);
+    await checkLoginLayout('password-saved',true);
+    await clickFormButton('使用已保存账密登录');
     await wait(()=>evaluate(`document.querySelector('.password-verification-dialog')?.innerText.includes('闲鱼自动登录安全验证')`),'background recovery verification appears without password entry');
     await wait(()=>evaluate(`!!document.querySelector('.password-verification-dialog img[alt="闲鱼官方人脸验证二维码"]')`),'background official QR ready');
     assert.equal(await evaluate(`Array.from(document.querySelectorAll('input[type="password"]')).some(el=>el.getBoundingClientRect().height>0)`),false);
