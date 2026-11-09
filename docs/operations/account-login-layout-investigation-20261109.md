@@ -56,3 +56,7 @@
 - `npm run build`（双端）、`npm --workspace apps/web run test`（592）、`npm --workspace apps/api run test:password-login`（69）、独立 PG 专项（1）以及 diff-check 均通过，无跳过。新增测试命令与首轮相同。
 
 环境无阻塞，未执行生产新挑战或部署。原始截图、临时数据库均不提交。本轮只在本地功能分支提交，等待人工审核。
+
+## 发布授权
+
+2026-11-09 用户审核上述修订后明确要求“部署服务器，当前 GitHub Action 额度用完，直接部署”。本次沿用腾讯云目标，授权本地合入 main、推送 GitHub 后通过 SSH 执行既有 `scripts/deploy-production.sh`，不使用 Actions，不上传源码或静态构建产物。原工作区删除保持原样；只在干净 main 验证工作区执行合并和复验。实际部署结果在执行后记录，本文不提前宣称发布成功。
