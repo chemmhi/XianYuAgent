@@ -23,6 +23,7 @@ const accountErrorLabels: Record<string, string> = {
   PASSWORD_DEVICE_INIT_FAILED: '官方设备环境启动失败，请检查服务运行环境。',
   PASSWORD_DEVICE_SIGNATURE_TIMEOUT: '官方设备组件生成请求参数超时，请重试。',
   PASSWORD_SECURITY_VERIFICATION_REQUIRED: '闲鱼要求安全验证，本次自动登录已暂停。',
+  PASSWORD_VERIFICATION_UNAVAILABLE: '闲鱼要求安全验证，但本次未能获取可用的验证页面或二维码。请重试登录，或切换扫码登录。',
   PASSWORD_IV_EXPIRED: '官方验证已过期，请重新登录。',
   PASSWORD_IV_RESPONSE_UNSUPPORTED: '官方验证步骤暂未识别，请稍后重试。',
   COOKIE_VERIFY_FAILED: '登录凭证校验失败，请复制最新完整 Cookie 后重试。',

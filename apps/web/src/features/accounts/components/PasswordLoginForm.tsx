@@ -84,9 +84,9 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
     <span className="password-verification-active" hidden />
     {createPortal(<div className="modal-backdrop password-verification-backdrop">
       <section className="modal-card password-verification-dialog" role="dialog" aria-modal="true" aria-labelledby="password-verification-title">
-        <header className="modal-head"><div><p className="eyebrow">Xianyu Verification</p><h2 id="password-verification-title">{session.automatic?'闲鱼自动登录安全验证':'闲鱼官方安全验证'}</h2></div>
+        <header className="modal-head"><div><p className="eyebrow">Xianyu Account</p><h2 id="password-verification-title">{session.status==='logging_in'?'正在登录闲鱼':session.automatic?'闲鱼自动登录安全验证':'闲鱼官方安全验证'}</h2></div>
           <button className="icon-button" type="button" aria-label="关闭安全验证" onClick={()=>void cancel().then(ok=>{if(ok)onClose?.();})}>×</button></header>
-        <div className="password-verification-content">{session.automatic&&<p className="account-login-hint">{session.accountDisplayName??'闲鱼账号'}已使用保存的账密发起登录，请完成官方验证，无需重新填写密码。</p>}{session.status==='verification_required'?<PasswordVerificationPanel api={api} session={session} />:<p role="status">正在确认官方登录和消息授权，请稍候…</p>}</div>
+        <div className="password-verification-content">{session.automatic&&<p className="account-login-hint">{session.accountDisplayName??'闲鱼账号'}正在使用保存的账密登录，无需重新填写密码。</p>}{session.status==='verification_required'?<PasswordVerificationPanel api={api} session={session} />:<p role="status">正在确认登录状态和消息授权；如闲鱼要求安全验证，会在此显示二维码或滑块。</p>}</div>
         <footer className="modal-actions"><Button type="button" onClick={()=>void cancel().then(ok=>{if(ok)onClose?.();})}>取消登录</Button></footer>
       </section>
     </div>,document.body)}
@@ -94,12 +94,14 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
 
   return (
     <Form className="account-login-form" onSubmit={submit}>
+      <div className="account-login-form-content">
       <InputField label="闲鱼账号" required disabled={busy} value={account} onChange={event => setAccount(event.target.value)} placeholder="手机号或用户名" autoComplete="username" autoFocus />
       <InputField label="密码" required disabled={busy} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" />
       <label className="account-login-hint"><input type="checkbox" checked={acceptTerms} disabled={busy} onChange={event => setAcceptTerms(event.target.checked)} /> 我已阅读并同意闲鱼登录页的服务协议和隐私政策；登录成功后加密保存账密，用于授权过期后的自动登录。</label>
       <p className="account-login-hint">首次登录可能需要安全验证，请按官方提示完成。</p>
       {savedAvailable&&<Button type="button" disabled={busy} onClick={()=>void retrySaved()}>使用已保存账密登录</Button>}
       {session?.status === 'logging_in' && <p role="status">正在登录闲鱼，请稍候…</p>}
+      </div>
       <div className="modal-actions">{busy && session && <Button type="button" onClick={() => void cancel()}>取消登录</Button>}<Button variant="primary" type="submit" disabled={busy || !acceptTerms}>{busy ? '登录中…' : existingAccountId ? '登录并恢复授权' : '登录并添加账号'}</Button></div>
     </Form>
   );
