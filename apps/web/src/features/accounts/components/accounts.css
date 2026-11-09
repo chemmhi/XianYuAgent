@@ -93,7 +93,9 @@
 .account-login-method-title em { padding: 2px 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 9px; font-style: normal; }
 .account-login-method-description { color: var(--sub); font-size: 10px; line-height: 1.45; }
 .account-login-body { min-height: 0; flex: 1 1 auto; overflow: auto; }
-.account-login-form { display: grid; gap: 12px; }
+.account-login-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.account-login-form-content { display: grid; flex: 1 1 auto; min-height: 0; gap: 12px; padding: 12px 23px 16px; overflow: auto; overscroll-behavior: contain; }
+.account-login-form > .modal-actions { flex: 0 0 auto; margin-top: 0; padding: 16px 23px; border-top: 1px solid var(--border); background: var(--card); }
 .account-login-hint { margin: 0; color: var(--sub); font-size: 10px; line-height: 1.55; }
 @keyframes qr-login-spin { to { transform: rotate(360deg); } }
 .account-delete-modal { width: min(430px, calc(100vw - 32px)); }
@@ -141,6 +143,7 @@
 .account-login-modal .account-login-methods { gap: 10px; margin: 7px 23px 0; }
 .account-login-method { min-height: 86px; }
 .account-login-body { padding: 0 23px 16px; overflow: auto; overscroll-behavior: contain; }
+.account-login-modal:not([data-active-method="qr"]) .account-login-body { display: flex; padding: 0; overflow: hidden; }
 .qr-login-view { gap: 0; }
 .qr-login-status-row { margin-top: 14px; }
 .qr-login-status-row .badge { border-radius: 999px; }
@@ -160,6 +163,7 @@
 .account-delete-modal .modal-actions { margin-top: 0; padding: 0 23px 21px; }
 
 @media (max-width: 900px) {
+  .account-login-form-content, .account-login-form > .modal-actions { padding-right: 16px; padding-left: 16px; }
   .modal-card.account-login-modal,
   .modal-card.account-delete-modal { width: 100%; }
   .account-login-modal .modal-head,

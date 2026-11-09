@@ -37,3 +37,22 @@
 - `git diff --check` 通过。临时 PostgreSQL 容器仅用于本次测试，验收后移除。
 
 未执行生产新挑战、长期无人值守续期或生产发布，不把受控平台夹具当作真实闲鱼验收。回滚为还原本次弹窗/CSS 与测试差异，没有数据库迁移。功能分支提交后等待仓库要求的人工审核；用户指定的本地合入 main 再 push 顺序优先于磁盘旧 PR-only 规则。
+
+## 用户复核后的修订：固定操作栏与验证反馈
+
+用户指出提交操作不应跟随表单滚动，并补充“逐星智能”11 点半之后手动登录只见验证中弹窗。上述首轮滚动方案已调整：PasswordLoginForm 和 CookieLoginForm 在同一 HTML Form 内拆分 `.account-login-form-content` 与底部操作栏，只有内容区滚动；弹窗头部、方式选择和底部提交保持固定。没有将表单提交分离到 Form 校验上下文之外。
+
+服务器复核仍只有 11:46 两次成功记录，没有新的失败记录。源码确认使用保存账密时 `session.automatic` 会在状态仍是 logging_in 时打开独立弹窗，但旧标题和提示已要求用户安全验证，容易误解为应该出现挑战内容。现在 logging_in 明确显示“正在登录闲鱼”；只有 verification_required 显示安全验证及实际二维码/滑块。历史数据库缺少逐步 UI/挑战记录，因此不把用户描述与某次平台挑战类型强制对应。
+
+另修复真实失败分支：传输层已经抛出 PasswordHttpVerificationRequired 并退出时，没有可继续的二维码或候选结果等待任务，旧服务却仍向页面返回 verification_required。现在保存 failed、completedAt 和 `PASSWORD_VERIFICATION_UNAVAILABLE`，清除不可用的验证展示，页面显示“本次未能获取可用的验证页面或二维码”及重试/切换扫码指引；自动记录暂停重试、旧凭证不改写、租约释放。仍在运行的原生挑战和人脸 IV 回调保留原流程，不将它们提前判失败。本次开始涉及后端验证状态修复，取代首轮“未修改后端”的范围结论，无迁移。
+
+设备隔离核验：PasswordLoginVault 以管理员和登录标识派生初始 profileKey，成功后通过账号和登录别名复用持久化 profile；OfficialPasswordDeviceFactory 在 `password-device/<profileKey>` 中保存 Cookie/Local Storage/官方设备 SDK 状态。同一账号复登及重启保持设备，未每次随机换设备。账号的浏览器存储隔离不等于 UA、浏览器版本、操作系统、屏幕、语言、时区或服务器出口 IP 都不同；启动适配器统一采用实际 Chrome、1440×900 viewport、zh-CN 和 Asia/Shanghai。腾讯云只读查询确认逐星智能一条设备 profile 记录，镜影映照无账密 profile；不宣称所有已添加账号都已初始化账密设备。
+
+修订验证：
+
+- 新增 2 项服务回归在旧代码失败（等待至 expired 而非 failed）；修复后通过，覆盖手动和保存账密重试、旧凭证保护、失败落库、暂停自动重试、租约释放。
+- 新浏览器布局断言在首轮方案失败（无独立滚动内容区）；修复后通过，12 种表单/尺寸组合检查提交按钮在滚动前后坐标不变。
+- Chrome/CDP → 正式页面/API → 独立 PostgreSQL → 页面验证通过：不可展示验证返回明确错误并持久化 failed；保存账密等待期间标题准确且无伪造挑战；官方人脸契约响应产生可见二维码；完成后存储 active 并关闭弹窗；服务重建后恢复通过。平台仍为本地契约夹具。
+- `npm run build`（双端）、`npm --workspace apps/web run test`（592）、`npm --workspace apps/api run test:password-login`（69）、独立 PG 专项（1）以及 diff-check 均通过，无跳过。新增测试命令与首轮相同。
+
+环境无阻塞，未执行生产新挑战或部署。原始截图、临时数据库均不提交。本轮只在本地功能分支提交，等待人工审核。
