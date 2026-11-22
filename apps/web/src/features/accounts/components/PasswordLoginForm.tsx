@@ -14,7 +14,10 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false), [acceptTerms, setAcceptTerms] = useState(false);
   const [session, setSession] = useState<PasswordLoginSessionVM|undefined>(initialSession);
-  const [savedAvailable,setSavedAvailable]=useState(false);
+  const [saved,setSaved]=useState<{available:boolean;loginId?:string}>({available:false});
+  const [savedLoading,setSavedLoading]=useState(!!existingAccountId);
+  const accountEdited=useRef(false);
+  const canReuseSaved=!!existingAccountId&&saved.available&&!!saved.loginId&&account.trim()===saved.loginId.trim();
   const mounted = useRef(true), current = useRef<PasswordLoginSessionVM | undefined>(initialSession);
   const apiRef=useRef(api);apiRef.current=api;
   const hasVerification=useRef(false);
@@ -23,7 +26,10 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
   const busy = submitting || !!session && ['logging_in', 'verification_required'].includes(session.status);
   const { showToast, dismissToast } = useToast();
   function report(cause: unknown) { showToast({ id: 'account-password-login', tone: 'error', message: accountErrorMessage(cause, '账号密码登录失败，请稍后重试。') }); }
-  useEffect(()=>{let live=true;if(existingAccountId&&api.getSavedPasswordAvailable)void api.getSavedPasswordAvailable(existingAccountId).then(value=>{if(live)setSavedAvailable(value);}).catch(()=>undefined);return()=>{live=false;};},[api,existingAccountId]);
+  useEffect(()=>{let live=true;setSaved({available:false});setSavedLoading(!!existingAccountId);accountEdited.current=false;setAccount('');setPassword('');
+    if(existingAccountId&&api.getSavedPasswordInfo)void api.getSavedPasswordInfo(existingAccountId).then(value=>{if(live){setSaved(value);if(!accountEdited.current)setAccount(value.loginId??'');}}).catch(cause=>{if(live)report(cause);}).finally(()=>{if(live)setSavedLoading(false);});
+    else setSavedLoading(false);
+    return()=>{live=false;};},[api,existingAccountId]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; const s = current.current; queueMicrotask(()=>{if(!mounted.current&&s&&!s.automatic&&['logging_in','verification_required'].includes(s.status))void apiRef.current.cancelPasswordSession?.(s.id).catch(()=>undefined);}); };
@@ -59,7 +65,7 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
     dismissToast('account-password-login');
     try {
       if (!api.createPasswordSession || !api.getPasswordSession) throw new Error('PASSWORD_LOGIN_UNAVAILABLE');
-      const next = await api.createPasswordSession({ account: account.trim(), password, accountId: existingAccountId, acceptTerms,
+      const next = !password&&canReuseSaved&&api.retrySavedPassword ? await api.retrySavedPassword(existingAccountId!,account.trim()) : await api.createPasswordSession({ account: account.trim(), password, accountId: existingAccountId, acceptTerms,
         clientInfo:{userAgent:navigator.userAgent,platform:navigator.platform,language:navigator.language,screenPixel:`${screen.width}x${screen.height}`} });
       if (!mounted.current) { await api.cancelPasswordSession?.(next.id); return; }
       current.current = next; setSession(next); setPassword('');
@@ -71,12 +77,6 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
     if (!session) return false;
     try { await api.cancelPasswordSession?.(session.id); current.current = { ...session, status: 'cancelled' }; setSession(current.current);return true; }
     catch (cause) { report(cause);return false; }
-  }
-  async function retrySaved(){
-    if(busy||!existingAccountId||!api.retrySavedPassword)return;
-    setSubmitting(true);dismissToast('account-password-login');
-    try{const next=await api.retrySavedPassword(existingAccountId);if(mounted.current){current.current=next;setSession(next);setPassword('');}}
-    catch(cause){if(mounted.current)report(cause);}finally{if(mounted.current)setSubmitting(false);}
   }
 
   if(session?.status==='verification_required'&&session.verificationPresentation==='http')hasVerification.current=true;
@@ -95,14 +95,13 @@ export function PasswordLoginForm({ api, existingAccountId, onCompleted, onClose
   return (
     <Form className="account-login-form" onSubmit={submit}>
       <div className="account-login-form-content">
-      <InputField label="闲鱼账号" required disabled={busy} value={account} onChange={event => setAccount(event.target.value)} placeholder="手机号或用户名" autoComplete="username" autoFocus />
-      <InputField label="密码" required disabled={busy} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" />
+      <InputField label="闲鱼账号" required disabled={busy} value={account} onChange={event => {accountEdited.current=true;setAccount(event.target.value);}} placeholder="手机号或用户名" autoComplete="username" autoFocus />
+      <InputField label="密码" required={!canReuseSaved} disabled={busy} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={canReuseSaved?"留空使用已保存的密码，填写则使用新密码":"请输入密码"} autoComplete="current-password" />
       <label className="account-login-hint"><input type="checkbox" checked={acceptTerms} disabled={busy} onChange={event => setAcceptTerms(event.target.checked)} /> 我已阅读并同意闲鱼登录页的服务协议和隐私政策；登录成功后加密保存账密，用于授权过期后的自动登录。</label>
       <p className="account-login-hint">首次登录可能需要安全验证，请按官方提示完成。</p>
-      {savedAvailable&&<Button type="button" disabled={busy} onClick={()=>void retrySaved()}>使用已保存账密登录</Button>}
       {session?.status === 'logging_in' && <p role="status">正在登录闲鱼，请稍候…</p>}
       </div>
-      <div className="modal-actions">{busy && session && <Button type="button" onClick={() => void cancel()}>取消登录</Button>}<Button variant="primary" type="submit" disabled={busy || !acceptTerms}>{busy ? '登录中…' : existingAccountId ? '登录并恢复授权' : '登录并添加账号'}</Button></div>
+      <div className="modal-actions">{busy && session && <Button type="button" onClick={() => void cancel()}>取消登录</Button>}<Button variant="primary" type="submit" disabled={busy || savedLoading || !acceptTerms}>{busy ? '登录中…' : existingAccountId ? '登录并恢复授权' : '登录并添加账号'}</Button></div>
     </Form>
   );
 }

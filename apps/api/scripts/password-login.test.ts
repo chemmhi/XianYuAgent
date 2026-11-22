@@ -318,3 +318,17 @@ test('saved-password retries cannot restore revoked management access or race a 
     const requests=await Promise.allSettled([f.login.retrySaved(f.admin.id,f.account.id),f.login.retrySaved(f.admin.id,f.account.id)]);assert.equal(requests.filter(r=>r.status==='fulfilled').length,1);assert.equal((await f.repository.get(f.admin.id,f.account.id))?.version,old.version+1);
   }finally{gate.resolve();await f.login.close();}
 });
+
+
+test('saved login metadata is manage-scoped, exposes only loginId and refuses a stale account on blank-password retry', async()=>{
+ const f=await fixture();try{
+  assert.deepEqual(await f.login.savedInfo(f.admin.id,f.account.id),{available:false});
+  const secret=await f.remember();assert.deepEqual(await f.login.savedInfo(f.admin.id,f.account.id),{available:true,loginId:'saved-phone'});
+  assert.equal(JSON.stringify(await f.login.savedInfo(f.admin.id,f.account.id)).includes('saved-password'),false);
+  const other=await f.store.createAdmin({email:'saved-info-other@example.test',passwordHash:'fixture',displayName:'other'});await f.store.grantScope({adminId:other.id,accountId:f.account.id,scope:'read'});
+  await assert.rejects(f.login.savedInfo(other.id,f.account.id));
+  await assert.rejects(f.login.retrySaved(f.admin.id,f.account.id,undefined,'changed-login'),{code:'PASSWORD_ACCOUNT_MISMATCH'});
+  assert.equal(f.calls(),0);assert.deepEqual(await f.repository.get(f.admin.id,f.account.id),secret);
+  const session=await f.login.retrySaved(f.admin.id,f.account.id,undefined,'saved-phone');assert.equal((await f.finish(session.id)).status,'succeeded');assert.equal(f.input()?.password,'saved-password');
+ }finally{await f.login.close();}
+});

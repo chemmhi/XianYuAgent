@@ -1300,10 +1300,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   const savedPasswordMatch=ctx.path.match(/^\/api\/v1\/accounts\/([0-9a-f-]+)\/password-login\/(saved|retry)$/i);
   if(savedPasswordMatch){
     const accountId=savedPasswordMatch[1];
-    if(savedPasswordMatch[2]==='saved'&&ctx.method==='GET')return success(ctx,{available:await runtime.passwordLogin.savedAvailable(authContext.admin.id,accountId)});
+    if(savedPasswordMatch[2]==='saved'&&ctx.method==='GET')return success(ctx,await runtime.passwordLogin.savedInfo(authContext.admin.id,accountId));
     if(savedPasswordMatch[2]==='retry'&&ctx.method==='POST')return mutation(runtime,ctx,authContext,accountId,async()=>{
       const presenterId=optionalString(ctx.body.presenterId);if(!presenterId||!/^[0-9a-f-]{36}$/i.test(presenterId))throw new ServiceError(422,'PASSWORD_CLIENT_INVALID','验证窗口标识无效');
-      return success(ctx,{session:await runtime.passwordLogin.retrySaved(authContext.admin.id,accountId,presenterId)},202);
+      return success(ctx,{session:await runtime.passwordLogin.retrySaved(authContext.admin.id,accountId,presenterId,optionalString(ctx.body.loginId))},202);
     });
   }
   if(ctx.path==='/api/v1/accounts/password-login/pending'&&ctx.method==='GET'){

@@ -57,9 +57,15 @@ export class PasswordLoginService {
     if(account.status==='disabled'||!(await this.store.listScopes(adminId)).some(s=>s.accountId===accountId&&s.scope==='manage'))throw new ServiceError(403,'FORBIDDEN','账号已停用或管理权限已失效');
     return !!await this.vault.repository.get(adminId,accountId);
   }
-  async retrySaved(adminId:string,accountId:string,presenterId?:string){
+  async savedInfo(adminId:string,accountId:string){
+    await this.savedAvailable(adminId,accountId);
+    const row=await this.vault.repository.get(adminId,accountId);
+    return row?{available:true,loginId:this.vault.open(row).account}:{available:false};
+  }
+  async retrySaved(adminId:string,accountId:string,presenterId?:string,expectedLoginId?:string){
     await this.savedAvailable(adminId,accountId);const row=await this.vault.repository.get(adminId,accountId);
     if(!row)throw new ServiceError(404,'PASSWORD_SECRET_MISSING','该账号尚未保存账密');
+    if(expectedLoginId!==undefined&&expectedLoginId.trim()!==this.vault.open(row).account.trim())throw new ServiceError(409,'PASSWORD_ACCOUNT_MISMATCH','保存的登录账号已变化，请刷新后重试');
     const session=await this.begin(adminId,{...this.vault.open(row),accountId},row,true);
     const entry=this.active.get(session.id);if(entry&&presenterId)entry.presenter={id:presenterId,expiresAt:Date.now()+30_000};
     return session;
