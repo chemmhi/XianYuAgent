@@ -1,3 +1,4 @@
+import { passwordLoginContinuation } from './password-login-continuation.js';
 import { createHash } from 'node:crypto';
 import type { PasswordLoginTransport, PasswordLoginInput, PasswordLoginResult } from './password-login-port.js';
 import { XIANYU_USER_AGENT, xianyuNavigatorPlatform } from './xianyu-browser-identity.js';
@@ -79,7 +80,7 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
             const text=await next.clone().text();let payload:unknown;
             try{payload=JSON.parse(text);}catch{/* Exchange endpoints may return an empty body. */}
             // IV documents contain ordinary verify URLs; only an actual native challenge pauses this hop.
-            const challenge=inspectXianyuVerification(payload, /_____tmd_____|RGV587|FAIL_SYS_USER_VALIDATE/.test(text)?text:'');
+            const challenge=inspectXianyuVerification(payload, /_____tmd_____|RGV587|FAIL_SYS_USER_VALIDATE/.test(text)?text:'',url);
             if(challenge.required)throw new PasswordHttpVerificationRequired(challenge.verificationUrl);
           }
           return next;
@@ -99,14 +100,16 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
         if(challenge.required)throw new PasswordHttpVerificationRequired(challenge.verificationUrl);
       }else await next.response.arrayBuffer();
     };
-    const json=async(response:Response)=>{
+    const json=async(response:Response,baseUrl=endpoints.mini,loginResponse=false)=>{
       const text=await response.text();if(text.length>2_000_000)throw new Error('PASSWORD_HTTP_RESPONSE_UNSUPPORTED');
       let parsed:Record<string,unknown>;
       try{parsed=JSON.parse(text);}catch{
-        const challenge=inspectXianyuVerification({},text);if(challenge.required)throw new PasswordHttpVerificationRequired(challenge.verificationUrl);
+        const challenge=inspectXianyuVerification({},text,baseUrl);if(challenge.required)throw new PasswordHttpVerificationRequired(challenge.verificationUrl);
         throw new Error('PASSWORD_HTTP_RESPONSE_UNSUPPORTED');
       }
-      const challenge=inspectXianyuVerification(parsed);if(challenge.required)throw new PasswordHttpVerificationRequired(challenge.verificationUrl);
+      const challenge=loginResponse?classifyPasswordLoginResponse(parsed,baseUrl):undefined;
+      if(challenge?.kind==='verification_required'){if(!challenge.url||!isPasswordIvUrl(challenge.url))throw new PasswordHttpVerificationRequired(challenge.url);}
+      else if(!loginResponse){const check=inspectXianyuVerification(parsed,'',baseUrl);if(check.required)throw new PasswordHttpVerificationRequired(check.verificationUrl);}
       if(!response.ok)throw new Error('PASSWORD_HTTP_RESPONSE_UNSUPPORTED');return parsed;
     };
     try {
@@ -133,16 +136,24 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
       const loginApi=this.options.endpoints?endpoints.login:allowed(String(record(config.api).loginApi??''),endpoints.mini);
       if(new URL(loginApi).pathname!==new URL(endpoints.login).pathname)throw new Error('PASSWORD_LOGIN_BOOTSTRAP_INVALID');
       const authenticate=async():Promise<PasswordLoginResult>=>{
-      const {payload,result}=await withNativeChallenge(async()=>{
-        const response=await http(loginApi,{method:'POST',headers:{accept:'application/json','content-type':'application/x-www-form-urlencoded',origin:new URL(endpoints.mini).origin,referer:mini.href},body:body.toString()});
-        const payload=await json(response),result=classifyPasswordLoginResponse(payload);
-        if(result.kind==='verification_required'&&(!result.url||!isPasswordIvUrl(result.url)))throw new PasswordHttpVerificationRequired(result.url);
+      const submitLogin=(url:string,formBody:string)=>withNativeChallenge(async()=>{
+        const response=await http(url,{method:'POST',headers:{accept:'application/json','content-type':'application/x-www-form-urlencoded',origin:new URL(endpoints.mini).origin,referer:mini.href},body:formBody});
+        const payload=await json(response,url,true),result=classifyPasswordLoginResponse(payload,url);
         return {payload,result};
       });
+      let {payload,result}=await submitLogin(loginApi,body.toString());
+      const continuations=new Set<string>();
+      for(;;){
+        const next=passwordLoginContinuation(payload);if(!next)break;
+        if(continuations.has(next)||continuations.size>=3)throw new Error('PASSWORD_LOGIN_CONTINUATION_LIMIT');
+        continuations.add(next);
+        // Retry only this current POST after a native challenge; never resubmit the password or a consumed ticket.
+        ({payload,result}=await submitLogin(next,''));
+      }
       if(result.kind==='verification_required'){
         if(result.url&&isPasswordIvUrl(result.url)){
           await completePasswordIv(result.url,{get:(url,referer)=>get(url,{referer:referer??mini.href}),
-            json:async(url,referer)=>{const page=await get(url,{referer:referer??mini.href,'x-requested-with':'XMLHttpRequest',accept:'application/json, text/javascript, */*; q=0.01'});return json(page.response);},assertActive:input.assertActive,signal:input.signal,
+            json:async(url,referer)=>{const page=await get(url,{referer:referer??mini.href,'x-requested-with':'XMLHttpRequest',accept:'application/json, text/javascript, */*; q=0.01'});return json(page.response,page.url);},assertActive:input.assertActive,signal:input.signal,
             onStatus:async status=>{if(!input.onIvStatus)throw new PasswordHttpVerificationRequired(result.url);await input.onIvStatus(status);},pollIntervalMs:this.options.ivPollIntervalMs});
         }else throw new PasswordHttpVerificationRequired(result.url);
       }else if(result.kind!=='succeeded')throw new Error(result.code);
@@ -165,7 +176,7 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
         const timestamp=String(Date.now()), token=cookieValue(jar,'_m_h5_tk',mtopUrl).split('_')[0];
         const params=new URLSearchParams({jsv:'2.7.2',appKey:'34839810',t:timestamp,sign:createHash('md5').update(`${token}&${timestamp}&34839810&${requestData}`).digest('hex'),v:version,type:'originaljson',accountSite:'xianyu',dataType:'json',timeout:'20000',api,sessionOption:'AutoLoginOnly',needLogin:'false'});
         const check=await http(`${endpoints.mtop}${api}/${version}/?${params}`,{method:'POST',headers:{accept:'application/json','content-type':'application/x-www-form-urlencoded',origin:new URL(endpoints.home).origin,referer:endpoints.home},body:new URLSearchParams({data:requestData}).toString()});
-        const checked=await json(check), ret=Array.isArray(checked.ret)?checked.ret.map(String):[];
+        const checked=await json(check,mtopUrl), ret=Array.isArray(checked.ret)?checked.ret.map(String):[];
         const classified=classifyPasswordLoginResponse(checked);
         if(classified.kind==='verification_required')throw new PasswordHttpVerificationRequired(classified.url);
         if(ret.length&&ret.every(r=>r.startsWith('SUCCESS::')))return record(checked.data);

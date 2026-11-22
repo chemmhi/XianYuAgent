@@ -32,8 +32,8 @@ export interface AccountsApi {
   createPasswordSession?(input: { account: string; password: string; accountId?: string; acceptTerms: boolean; clientInfo?: {userAgent:string;platform:string;language:string;screenPixel:string} }): Promise<PasswordLoginSessionVM>;
   getPasswordSession?(id: string): Promise<PasswordLoginSessionVM>;
   getPendingPasswordSession?():Promise<PasswordLoginSessionVM|null>;
-  getSavedPasswordAvailable?(accountId:string):Promise<boolean>;
-  retrySavedPassword?(accountId:string):Promise<PasswordLoginSessionVM>;
+  getSavedPasswordInfo?(accountId:string):Promise<{available:boolean;loginId?:string}>;
+  retrySavedPassword?(accountId:string,loginId?:string):Promise<PasswordLoginSessionVM>;
   cancelPasswordSession?(id: string): Promise<void>;
   submitPasswordVerification?(id:string,input:{challengeId:string;candidate?:{value:string;expire:number;host:string}}):Promise<void>;
 }
@@ -168,8 +168,8 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
     },
     async cancelPasswordSession(id) { await requirePost(transport)(`/api/v1/accounts/password-login/${encodeURIComponent(id)}/cancel`, {}, { headers: { 'Idempotency-Key': crypto.randomUUID() } }); },
     async getPendingPasswordSession(){return unwrapEnvelope(await transport.get<{session:PasswordLoginSessionVM|null}>(`/api/v1/accounts/password-login/pending?presenterId=${presenterId}`)).session;},
-    async getSavedPasswordAvailable(accountId){return unwrapEnvelope(await transport.get<{available:boolean}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/saved`)).available;},
-    async retrySavedPassword(accountId){return unwrapEnvelope(await requirePost(transport)<{session:PasswordLoginSessionVM}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/retry`,{presenterId},{headers:{'Idempotency-Key':crypto.randomUUID()}})).session;},
+    async getSavedPasswordInfo(accountId){return unwrapEnvelope(await transport.get<{available:boolean;loginId?:string}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/saved`));},
+    async retrySavedPassword(accountId,loginId){return unwrapEnvelope(await requirePost(transport)<{session:PasswordLoginSessionVM}>(`/api/v1/accounts/${encodeURIComponent(accountId)}/password-login/retry`,{presenterId,loginId},{headers:{'Idempotency-Key':crypto.randomUUID()}})).session;},
     async submitPasswordVerification(id,input){await requirePost(transport)(`/api/v1/accounts/password-login/${encodeURIComponent(id)}/verification`,{...input,presenterId},{headers:{'Idempotency-Key':crypto.randomUUID()}});},
   };
 }

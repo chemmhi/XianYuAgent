@@ -16,6 +16,9 @@ describe('account feedback translation', () => {
 
   it.each([
     [new Error('ACCOUNT_CONTEXT_INVALID'), '该账号不可用，请刷新列表后重新选择。'],
+    [new Error('PASSWORD_LOGIN_CONTINUATION_UNSUPPORTED'), '闲鱼要求额外登录确认，当前暂无法继续，请切换扫码登录。'],
+    [new Error('PASSWORD_LOGIN_CONTINUATION_INVALID'), '闲鱼返回的登录确认信息无效，请重新登录。'],
+    [new Error('PASSWORD_LOGIN_CONTINUATION_LIMIT'), '闲鱼登录确认未能完成，请稍后重试。'],
     [new Error('PASSWORD_VERIFICATION_UNAVAILABLE'), '闲鱼要求安全验证，但本次未能获取可用的验证页面或二维码。请重试登录，或切换扫码登录。'],
     [new ApiError('raw forbidden', 403), '当前账号没有操作权限。'],
     [new ApiError('raw timeout', 504), '请求超时，请稍后重试。'],

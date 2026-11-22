@@ -41,9 +41,13 @@ const platform = createServer(async (req, res) => {
     if(loginGate)await loginGate;
     const deviceFields=new URLSearchParams(submitted);assert.equal(deviceFields.get('ua'),'fixture-ua');assert.equal(deviceFields.get('deviceId'),'stable-device-id');assert.equal(deviceFields.get('bx-ua'),'fixture-current-sdk');assert.equal(deviceFields.get('umidGetStatusVal'),'255');
     if(unavailableVerification){res.setHeader('content-type','application/json');return res.end(JSON.stringify({content:{data:{needSmsCheck:true}}}));}
-    if(verificationMode&&!faceApproved){res.setHeader('content-type','application/json');return res.end(JSON.stringify({content:{success:true,data:{resultCode:100,iframeRedirect:true,iframeRedirectUrl:'https://passport.goofish.com/iv/remote/pc/mini_login_check.htm?havana_iv_token=fixture'}}}));}
+    return res.end(JSON.stringify({content:{success:true,data:{resultCode:100,dialogAction:'keepLoginConfirm',feedbackPayload:{dynamicUrl:{dialogDefaultLoginUrl:'https://passport.goofish.com/login_token/login.do?token=fixture&confirm=false'}}}}}));
+  }
+  if(req.url?.startsWith('/login_token/login.do')) {
+    if(verificationMode&&!faceApproved){res.setHeader('content-type','application/json');return res.end(JSON.stringify({ret:['FAIL_SYS_USER_VALIDATE'],content:{success:true,data:{resultCode:100,iframeRedirect:true,iframeRedirectUrl:'https://passport.goofish.com/iv/remote/pc/mini_login_check.htm?havana_iv_token=fixture'}}}));}
     res.setHeader('set-cookie',['unb=880000009901; Domain=.goofish.com; Path=/; HttpOnly; Secure','cookie2=valid; Domain=.goofish.com; Path=/; HttpOnly; Secure']); res.setHeader('content-type','application/json');
     return res.end(JSON.stringify({ content: { success: true, data: { resultCode: 100 } }, hasError: false }));
+
   }
   if(req.url?.startsWith('/h5/')){cookieChecks++;res.setHeader('content-type','application/json');if(!req.headers.cookie?.includes('_m_h5_tk=')){res.setHeader('set-cookie','_m_h5_tk=fixture_9999999999999; Domain=.goofish.com; Path=/; Secure');return res.end(JSON.stringify({ret:['FAIL_SYS_TOKEN_EXPIRED::refresh']}));}return res.end(JSON.stringify({ret:['SUCCESS::OK'],data:req.url.includes('pc.login.token')?{accessToken:'fixture-im-access-token'}:{userId:'880000009901'}}));}
   res.end('{}');
@@ -95,14 +99,14 @@ try {
         body.scrollTop=0;
         const submit=document.querySelector('.account-login-form button[type="submit"]'),before=submit.getBoundingClientRect().top;
         body.scrollTop=body.scrollHeight;
-        const buttons=[document.querySelector('.account-login-form button[type="submit"]'),...Array.from(document.querySelectorAll('.account-login-form button')).filter(b=>b.textContent==='使用已保存账密登录')];
+        const buttons=[document.querySelector('.account-login-form button[type="submit"]')];
         return {fixed:Math.abs(submit.getBoundingClientRect().top-before)<1,inside:bounds.top>=0&&bounds.bottom<=innerHeight,scrollable:body.scrollHeight<=body.clientHeight+1||['auto','scroll'].includes(overflow),buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),p=modal.getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom&&r.left>=0&&r.right<=innerWidth&&[r.top+1,r.bottom-1].every(y=>b.contains(document.elementFromPoint(r.x+r.width/2,y)));})};
       })()`);
       assert.ok(layout,`${prefix} has a separate scrolling content area`);
       assert.equal(layout.fixed,true,`${prefix} submit does not move while content scrolls`);
       assert.equal(layout.inside,true,`${prefix} modal fits ${width}x${height}`);
       assert.equal(layout.scrollable,true,`${prefix} overflowing form can be scrolled ${width}x${height}`);
-      assert.equal(layout.buttons.length,saved?2:1);
+      assert.equal(layout.buttons.length,1);
       assert.ok(layout.buttons.every(Boolean),`${prefix} entire buttons are reachable ${width}x${height}: ${JSON.stringify(layout)}`);
       await writeFile(join(evidence,`${prefix}-${width}x${height}.png`),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
     }
@@ -159,11 +163,14 @@ try {
     await evaluate(`[...document.querySelectorAll('button')].find(el=>el.textContent==='授权').click()`);
     await wait(()=>evaluate(`!!document.querySelector('[data-login-method="password"]')`),'existing-account password tab');
     await evaluate(`document.querySelector('[data-login-method="password"]').click()`);
-    const savedStatus=await fetch(apiOrigin+`/api/v1/accounts/${account.id}/password-login/saved`,{headers:{cookie:`session_id=${auth.session.id}; csrf_token=${auth.csrfToken}`}});assert.equal(savedStatus.status,200);assert.equal((await savedStatus.json()).data.available,true);
-    await wait(()=>evaluate(`Array.from(document.querySelectorAll('button')).some(el=>el.textContent==='使用已保存账密登录')`),'saved-password retry is offered').catch(async error=>{throw new Error(error.message+'; fixture dialog: '+await evaluate(`document.querySelector('[role="dialog"]')?.innerText`));});
+    const savedStatus=await fetch(apiOrigin+`/api/v1/accounts/${account.id}/password-login/saved`,{headers:{cookie:`session_id=${auth.session.id}; csrf_token=${auth.csrfToken}`}});assert.equal(savedStatus.status,200);const savedInfo=(await savedStatus.json()).data;assert.deepEqual(savedInfo,{available:true,loginId:'fixture-phone'});
+    await wait(()=>evaluate(`document.querySelector('.account-login-form input[autocomplete="username"]')?.value==='fixture-phone'`),'saved loginId is prefilled').catch(async error=>{throw new Error(error.message+'; fixture dialog: '+await evaluate(`document.querySelector('[role="dialog"]')?.innerText`));});
     await checkLoginLayout('password-saved',true);
     loginGate=new Promise(resolve=>{releaseLogin=resolve;});
-    await clickFormButton('使用已保存账密登录');
+    assert.equal(await evaluate(`document.querySelector('.account-login-form input[autocomplete="username"]').value`),'fixture-phone');
+    assert.equal(await evaluate(`document.querySelector('.account-login-form input[type="password"]').value`),'');
+    await evaluate(`document.querySelector('.account-login-form input[type="checkbox"]').click()`);
+    await clickFormButton('登录并恢复授权');
     await wait(()=>evaluate(`document.querySelector('#password-verification-title')?.textContent==='正在登录闲鱼'`),'saved-password login is not mislabeled as security verification');
     assert.equal(await evaluate(`!!document.querySelector('.password-verification-dialog img, .password-verification-dialog iframe')`),false,'no fake challenge before platform asks for one');
     releaseLogin();loginGate=undefined;
@@ -182,12 +189,34 @@ try {
     await wait(()=>evaluate(`!document.querySelector('.password-verification-dialog')`),'background verification closes after success');
     assert.equal((await runtime.store.getCredential(admin.id,account.id)).status,'active');assert.equal(submissions,3,'automatic face confirmation preserves the same password attempt');
   }
+  // The same single button uses a new nonempty password instead of the remembered one.
+  if(verificationMode){
+    await evaluate(`[...document.querySelectorAll('button')].find(el=>el.textContent==='授权').click()`);
+    await wait(()=>evaluate(`!!document.querySelector('[data-login-method="password"]')`),'reauthorize with new password');
+    await evaluate(`document.querySelector('[data-login-method="password"]').click()`);
+    await wait(()=>evaluate(`document.querySelector('.account-login-form input[autocomplete="username"]')?.value==='fixture-phone'`),'saved account prefill');
+    assert.equal(await evaluate(`document.querySelector('.account-login-form input[type="password"]').value`),'');
+    assert.equal(await evaluate(`document.querySelector('.account-login-form').innerText.includes('使用已保存账密登录')`),false);
+    for(const [width,height,name]of [[1440,900,'unified-password-desktop.png'],[390,844,'unified-password-mobile.png']]){
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+      await writeFile(join(evidence,name),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    }
+    await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+    await evaluate(`(()=>{const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set,input=document.querySelector('.account-login-form input[autocomplete="username"]');set.call(input,'different-login');input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.account-login-form input[type="checkbox"]').click();})()`);
+    await clickFormButton('登录并恢复授权');
+    assert.equal(submissions,3,'changed loginId cannot silently reuse the old password');
+    await evaluate(`(()=>{const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;for(const [selector,value]of [['input[autocomplete="username"]','fixture-phone'],['input[type="password"]','fresh-fixture-password']]){const input=document.querySelector('.account-login-form '+selector);set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));}})()`);
+    await clickFormButton('登录并恢复授权');
+    await wait(()=>evaluate(`!document.querySelector('.account-modal-backdrop') && !document.querySelector('.password-verification-dialog')`),'new password completes');
+    assert.equal(runtime.passwordLogin.vault.open(await runtime.passwordLogin.vault.repository.get(admin.id,account.id)).password,'fresh-fixture-password');
+    assert.equal(submissions,4);
+  }
   // Rebuild service objects against the same database to prove encrypted recovery survives process-local state loss.
   await runtime.close(); runtime=createApp(config,{passwordTransport:browser});runtime.xianyuIm.startListener=async()=>undefined;runtime.xianyu.fetchProfile=async()=>({success:true,accountInvalid:false,response:{userId:'880000009901',nickname:'密码登录端到端账号'}});
   const current=await runtime.store.getCredential(admin.id,account.id);await runtime.store.markCredentialVerified({adminId:admin.id,accountId:account.id,status:'expired',expected:current});
   const restored=await runtime.passwordLogin.vault.repository.get(admin.id,account.id);await runtime.passwordLogin.recover(restored);
   assert.equal((await runtime.store.getCredential(admin.id,account.id)).status,'active');assert.ok(cookieChecks>=2);
-  assert.equal(submissions,verificationMode?4:3,'restart recovery performs another password login via HTTP');
+  assert.equal(submissions,verificationMode?5:3,'restart recovery performs another password login via HTTP');
   await writeFile(join(evidence,'result.json'),JSON.stringify({browser:'Chrome/CDP',database:'isolated PostgreSQL',externalPlatform:'local login contract fixture',reactForm:true,independentVerificationDialog:verificationMode,expiredAccountRestored:true,encryptedPasswordSaved:true,restartRecovery:true,realGoofishAcceptance:false,realImRegistration:false},null,2));
   console.log('Password login product DOM -> API -> PostgreSQL -> DOM and restart recovery PASS; external platform is a local contract fixture');
 } finally {
