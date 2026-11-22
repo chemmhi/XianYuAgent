@@ -52,6 +52,7 @@ services:
       COOKIE_SECURE: "false"
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       XIANYU_PASSWORD_LOGIN_ENABLED: ${XIANYU_PASSWORD_LOGIN_ENABLED:-true}
+      XIANYU_SYSTEM_USERS_FILE: /app/runtime-config/xianyu-system-users.json
       ALLOW_IN_MEMORY: "false"
       API_KEY: ${API_KEY:-}
       BASE_URL: ${BASE_URL:-https://api.openai.com/v1}
@@ -87,6 +88,7 @@ services:
       - "8080:8080"
     volumes:
       - browser_data:/app/browser_data
+      - ./runtime-config:/app/runtime-config:ro
       - pi_skill_data:/app/pi_skills
     depends_on:
       postgres:
@@ -104,6 +106,7 @@ services:
     init: true
     environment:
       XIANYU_IM_OWNER_URL: http://api:8080
+      XIANYU_SYSTEM_USERS_FILE: /app/runtime-config/xianyu-system-users.json
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
@@ -133,6 +136,7 @@ services:
         condition: service_healthy
     volumes:
       - pi_skill_data:/app/pi_skills
+      - ./runtime-config:/app/runtime-config:ro
     command: ["node", "dist/worker.js"]
 
 volumes:

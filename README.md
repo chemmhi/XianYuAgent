@@ -30,6 +30,43 @@ FishAgent 将对话、商品、订单和运营工具接入同一套工作流。�
 
 信息不足时，Agent 可以继续查询相关工具；确实无法处理时转交人工。系统支持人工介入后停止自动回复、分段发送、发送前检查和结果跟踪，执行过程可在 Agent 动态中查看。上下文按需获取，不会把全部商品和全部聊天记录一次性塞进每个请求。
 
+### 系统用户 ID 池：独立文件维护，保存即生效
+
+闲小蜜等平台通知账号可能使用普通文本消息格式。系统通过**发送方 ID** 识别这些账号，池中用户的消息保留在聊天记录中，但不会触发 AI。默认包含 `1400`，不依靠昵称或正文关键词判断；普通买家使用相同昵称或文案不会因此被屏蔽。
+
+维护文件为仓库目录下的 **`runtime-config/xianyu-system-users.json`**，格式如下。添加 ID 时在 `userIds` 数组追加字符串：
+
+```json
+{
+  "version": 1,
+  "userIds": ["1400"]
+}
+```
+
+该文件由运维独立维护，不提交 Git，不需要新增设置页面。API、Worker 在消息分类、AI 入口、旧发送任务恢复及每段发送前读取最新有效配置；**修改并保存即可生效，无需提交代码、重新部署或重启**。已经提交给平台的发送无法撤回，已成功发送的历史记录仍保留。人工聊天及原有订单校验规则不受此池影响。
+
+生产部署脚本首次创建此文件，后续部署保留已有内容。腾讯云文件位置：`/home/ubuntu/xianyu-agent-prod/runtime-config/xianyu-system-users.json`。API 和 Worker 只读挂载整个目录，编辑器通过原子替换保存也能被检测到。首次本地使用或手动启动 Compose 前，在仓库根目录执行：
+
+```powershell
+New-Item -ItemType Directory -Force runtime-config
+# 仅在目标文件不存在时复制，不要覆盖已维护的池。
+if (!(Test-Path runtime-config/xianyu-system-users.json)) {
+  Copy-Item apps/api/config/xianyu-system-users.example.json runtime-config/xianyu-system-users.json
+}
+```
+
+直接运行 Node 开发服务且没有运行文件时使用示例默认值；可用 `XIANYU_SYSTEM_USERS_FILE` 指定 API 和 Worker 共用的绝对文件路径。ID 必须是正整数字符串，最多 32 位，可带 `@goofish` 后缀；文件上限 1 MiB、最多 10,000 项，空数组表示不按 ID 屏蔽。
+
+保存了无效 JSON、非法 ID 或文件暂时不可读时，进程保留上一次有效池并输出配置错误；**重启后没有有效运行配置则禁止 AI 回复**，消息接收和人工聊天仍可使用。部署前校验失败会阻止新版本发布；不要通过删除坏文件期待覆盖用户配置。修正文件后自动恢复读取。生产检查命令：
+
+```bash
+cd /home/ubuntu/xianyu-agent-prod
+docker compose -f compose.prod.yml exec -T api node scripts/check-system-users.mjs
+docker compose -f compose.prod.yml exec -T worker node scripts/check-system-users.mjs
+```
+
+命令显示归一化后的 ID 池，配置无效时返回非零退出码。被阻止的未发送 AI 任务进入终止状态，从池中删除 ID 不会重新发送这些旧任务。配置与程序回滚分别管理；保留运行文件，回滚到不支持此功能的旧版本将失去 ID 池保护。
+
 ### 主备模型：两套配置应对模型服务风险
 
 每个账号可以配置主模型与备用模型，分别设置 API Key、Base URL 和模型。系统支持自动路由、手动优先主模型、手动优先备用模型，并根据故障状态进行切换、冷却和恢复探测。

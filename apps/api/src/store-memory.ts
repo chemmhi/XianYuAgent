@@ -2068,6 +2068,16 @@ export class MemoryStore implements Store {
     Object.assign(record, { status: 'dead_lettered' as const, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: now });
     return true;
   }
+  async suppressPendingAutoReplyOutbox(input: { adminId: string; runId: string; errorCode: string }): Promise<number> {
+    let count = 0;
+    for (const record of this.autoReplyOutbox.values()) {
+      if (record.scope !== 'auto_reply_send' || record.aggregateId !== input.runId || record.payload.adminId !== input.adminId) continue;
+      if (record.status !== 'pending' && record.status !== 'retryable' && !(record.status === 'processing' && record.leaseExpiresAt && Date.parse(record.leaseExpiresAt) <= Date.now())) continue;
+      Object.assign(record, { status: 'dead_lettered' as const, lastErrorCode: input.errorCode, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: new Date().toISOString() });
+      count++;
+    }
+    return count;
+  }
   async recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void> {
     const key = auditDedupeKey(event, options?.routine);
     const existing = key ? this.auditSummaries.get(key) : undefined;

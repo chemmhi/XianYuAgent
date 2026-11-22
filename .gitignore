@@ -43,3 +43,6 @@ runtime-live/*.enable.owners.lock
 
 # Explicitly configured browser profiles are runtime state, not source files.
 apps/api/browser_data/
+
+# Operator-owned hot configuration; deployments only create missing defaults.
+runtime-config/

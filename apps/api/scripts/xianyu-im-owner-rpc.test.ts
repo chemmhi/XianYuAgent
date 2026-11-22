@@ -36,6 +36,14 @@ test('app wiring shares a separate RPC secret without rotating credential encryp
   }
 });
 
+test('AI send purpose and policy rejection survive owner RPC while manual sending stays separate', async () => {
+  const h = await harness({ sendAutoReplyText: async () => { throw new ServiceError(409, 'XIANYU_SYSTEM_USER_IGNORED', 'AI replies to system users are disabled'); }, sendExternalText: async () => ({ externalMessageRef: 'manual.PNM' }) });
+  try {
+    await assert.rejects(() => h.client.call('sendAutoReplyText', [...h.args]), { code: 'XIANYU_SYSTEM_USER_IGNORED' });
+    assert.deepEqual(await h.client.call('sendExternalText', [...h.args]), { externalMessageRef: 'manual.PNM' });
+  } finally { await h.close(); }
+});
+
 test('RPC rejects the development encryption fallback when no separate secret is configured', () => {
   const config = loadConfig({ NODE_ENV: 'test', ALLOW_IN_MEMORY: 'true' });
   assert.equal(config.imOwnerSecret, undefined);

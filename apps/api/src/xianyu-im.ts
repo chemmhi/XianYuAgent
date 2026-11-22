@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isXianyuSystemUser } from './xianyu-system-users.js';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuImUserAgent, xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 import { hasXianyuStructuredSystemMarker, hasXianyuSystemEnvelopeMarker, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
@@ -262,7 +263,7 @@ export class XianyuImClient {
     await this.sendLwp('/r/MessageStatus/read', [ids]);
   }
 
-  async sendText(conversationRef: string, recipientRef: string, text: string, requestId?: string): Promise<{ externalMessageRef?: string }> {
+  async sendText(conversationRef: string, recipientRef: string, text: string, requestId?: string, beforeSend?: () => void): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     const cid = stripGoofish(conversationRef);
     const toId = stripGoofish(recipientRef);
@@ -282,7 +283,7 @@ export class XianyuImClient {
         msgReadStatusSetting: 1,
       },
       { actualReceivers: [`${toId}@goofish`, `${this.myId}@goofish`] },
-    ], { retryAfterReconnect: false });
+    ], { retryAfterReconnect: false, beforeSend });
     try { assertSendAccepted(response); } catch (error) {
       this.setStatus('failed');
       await this.notifyFailure(error);
@@ -506,11 +507,13 @@ export class XianyuImClient {
     await this.saveCredential?.({ ...this.credential });
   }
 
-  private async sendLwp(lwp: string, body: unknown[], options: { retryAfterReconnect?: boolean; preserveConnectionOnRejection?: boolean } = {}): Promise<Record<string, unknown>> {
+  private async sendLwp(lwp: string, body: unknown[], options: { retryAfterReconnect?: boolean; preserveConnectionOnRejection?: boolean; beforeSend?: () => void } = {}): Promise<Record<string, unknown>> {
     const retryAfterReconnect = options.retryAfterReconnect ?? true;
     if (!this.connected) await this.connect();
     const generation = this.connectionGeneration;
     const mid = createMid();
+    // A policy fence runs after connection/refresh, synchronously before the socket write.
+    options.beforeSend?.();
     try {
       return await this.sendAndWait(mid, { lwp, headers: { mid }, body });
     } catch (error) {
@@ -527,13 +530,15 @@ export class XianyuImClient {
         if (this.connectionGeneration === generation) {
           await this.reconnectWithFreshToken();
         }
-        const retryMid = createMid();
-        return await this.sendAndWait(retryMid, { lwp, headers: { mid: retryMid }, body });
       } catch (retryError) {
         this.setStatus('failed');
         await this.notifyFailure(retryError);
         throw retryError;
       }
+      const retryMid = createMid();
+      options.beforeSend?.();
+      try { return await this.sendAndWait(retryMid, { lwp, headers: { mid: retryMid }, body }); }
+      catch (retryError) { this.setStatus('failed'); await this.notifyFailure(retryError); throw retryError; }
     }
   }
 
@@ -749,7 +754,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   // Order-status parsing remains a second-stage guard in XianyuImService.
   const platformSystemMessage = hasXianyuStructuredSystemMarker(msg10, extension, decoded)
     || isOrderStatusReminder(bodyText, msg10, extension);
-  const bodyType = decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
+  const bodyType = isXianyuSystemUser(senderRef) ? 'system' : decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
     accountId,
@@ -856,8 +861,9 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
   const decoded = decodeOperationContent(content, extensions);
   const platformSystemMessage = hasXianyuStructuredSystemMarker(content, extensions, operation, sessionInfo, decoded)
     || isOrderStatusReminder(decoded.text, content, extensions, operation, sessionInfo);
-  const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
-  if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
+  const decodedBodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
+  if (decodedBodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
+  const bodyType = isXianyuSystemUser(senderRef) ? 'system' : decodedBodyType;
   const timestamp = normalizeTimestamp(
     content.createAt ?? content.createTime ?? content.createdAt ?? content.timestamp ?? operation.createAt ?? operation.createTime ?? operation.createdAt ?? operation.timestamp ?? sessionInfo.modifyTime ?? message.createTime ?? message.timestamp,
     receivedAt,

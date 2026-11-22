@@ -367,7 +367,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     },
     sender: new ReliableExternalAutoReplySender(store, messages, async (input) => {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
-      return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
+      return xianyuIm.sendAutoReplyText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),
     repairRuntime: autoReplyRepair,
     requireRepairRuntime: true,

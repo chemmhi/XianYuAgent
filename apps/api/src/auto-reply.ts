@@ -1,6 +1,7 @@
 import type { AutoReplyDecision, AutoReplyOrderContext, AutoReplyProductContext, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
+import { assertXianyuSystemUserPoolReady, isXianyuSystemUser, XIANYU_SYSTEM_USER_IGNORED } from './xianyu-system-users.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 import { AutoReplyDeadlineError, createAutoReplyDeadline, withAbort, timeoutProgress, type AutoReplyDeadline } from './auto-reply-timeout.js';
@@ -80,6 +81,7 @@ export interface AutoReplySender {
   send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string; outboxJobId?: string }>;
   markPersisted?(input: { outboxJobId?: string; outboundMessageId: string }): Promise<void>;
   recoverRun?(input: { adminId: string; runId: string }): Promise<{ outboundMessageIds: string[]; senderOutcome?: 'known_success' | 'unknown' }>;
+  suppressRun?(input: { adminId: string; runId: string; reason: string }): Promise<void>;
 }
 
 export class NoopAutoReplySender implements AutoReplySender {
@@ -260,6 +262,18 @@ export class AutoReplyService {
     const inputDigest = digestJson({ inboundMessageId: inboundMessage.id, bodyType: inboundMessage.bodyType, bodyText: inboundMessage.bodyText ?? '' });
     const replay = await this.store.findAutoReplyRunByInboundMessage(input.adminId, inboundMessage.id);
     if (replay) {
+      if (isXianyuSystemUser(conversation.buyerRef)) {
+        await this.sender.suppressRun?.({ adminId: input.adminId, runId: replay.id, reason: XIANYU_SYSTEM_USER_IGNORED });
+        const recovered = await this.sender.recoverRun?.({ adminId: input.adminId, runId: replay.id });
+        const recoveredOutboundMessageId = recovered?.outboundMessageIds.at(-1);
+        if (recoveredOutboundMessageId) {
+          const updated = replay.status === 'persisted' ? replay : await this.store.updateAutoReplyRun(replay.id, { status: 'persisted', decision: 'replied', senderOutcome: 'known_success', outboundMessageId: recoveredOutboundMessageId });
+          return { run: updated ?? replay, inboundMessage, outboundMessage: await this.findMessage(input.adminId, input.conversationId, recoveredOutboundMessageId) };
+        }
+        // Already persisted sends are history; blocking remaining jobs must not rewrite that fact.
+        const updated = replay.status === 'persisted' ? replay : await this.store.updateAutoReplyRun(replay.id, { status: 'skipped', decision: 'skipped', failureCode: XIANYU_SYSTEM_USER_IGNORED, riskFlags: [...new Set([...replay.riskFlags, 'xianyu_system_message'])] });
+        return { run: updated ?? replay, inboundMessage };
+      }
       if (this.sender.recoverRun) {
         try {
           const recovered = await this.sender.recoverRun({ adminId: input.adminId, runId: replay.id });
@@ -344,6 +358,11 @@ export class AutoReplyService {
       }
     };
     try {
+      assertXianyuSystemUserPoolReady();
+      if (isXianyuSystemUser(conversation.buyerRef)) {
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: XIANYU_SYSTEM_USER_IGNORED, riskFlags: ['xianyu_system_message'] });
+        return { run: updated ?? run, inboundMessage };
+      }
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       deadline = createAutoReplyDeadline(runtime.totalTimeoutMs);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
@@ -747,6 +766,13 @@ export class AutoReplyService {
           return { run: updated ?? run, inboundMessage, classification, context, repair };
         }
         const segment = segments[index]!;
+        const currentConversation = await this.store.getConversation(input.adminId, conversation.id);
+        assertXianyuSystemUserPoolReady();
+        if (isXianyuSystemUser(conversation.buyerRef) || isXianyuSystemUser(currentConversation?.buyerRef)) {
+          await this.sender.suppressRun?.({ adminId: input.adminId, runId: run.id, reason: XIANYU_SYSTEM_USER_IGNORED });
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: XIANYU_SYSTEM_USER_IGNORED, riskFlags: [...classification.riskFlags, 'xianyu_system_message'], outboundMessageId: lastOutboundMessageId });
+          return { run: updated ?? run, inboundMessage, classification, context, repair };
+        }
         const sendRequestId = segments.length > 1 ? `${requestId}:segment:${index + 1}` : requestId;
         const sent = await withAbort(this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length }), deadline.signal, 'send_wait');
         await this.godView?.emit({
