@@ -15,8 +15,8 @@ function inbox(socket: WebSocket) {
   return { json, binary, next: (type: string) => until(() => json.find(message => message.type === type), Boolean) };
 }
 
-export async function verificationTransportScenario(databaseUrl?: string, nativeChallenge = false, rejectFirstSlide = false, continuous = false, processingDelayMs = 0) {
-  const f = await createVerificationServiceFixture({ databaseUrl, nativeChallenge, rejectFirstSlide }); const origin = 'http://127.0.0.1:5173';
+export async function verificationTransportScenario(databaseUrl?: string, nativeChallenge = false, rejectFirstSlide = false, continuous = false, processingDelayMs = 0, passwordAuthenticated = false) {
+  const f = await createVerificationServiceFixture({ databaseUrl, nativeChallenge, rejectFirstSlide, passwordAuthenticated }); const origin = 'http://127.0.0.1:5173';
   const clientId = randomUUID(); let eventSocket: WebSocket | undefined; let stream: WebSocket | undefined; let presence: ReturnType<typeof setInterval> | undefined;
   const call = async (path: string, body?: unknown, key = randomUUID(), csrf = f.csrf, cookie = f.cookie) => {
     const response = await fetch(`${f.baseUrl}/api/v1/verification-sessions${path}`, { method: body ? 'POST' : 'GET',
@@ -176,6 +176,7 @@ export async function verificationTransportScenario(databaseUrl?: string, native
       assert.equal((await f.runtime.store.listAccountVerificationRisks(f.admin.id, f.account.id)).length, 0);
       assert.equal((await f.runtime.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'fixture-access');
       assert.equal(f.stats.browserLaunches, 1); assert.equal(f.stats.slideAnswers, rejectFirstSlide ? 2 : 1); assert.equal(f.stats.refreshes, rejectFirstSlide ? 1 : 0); assert.equal(f.stats.registrations, 1); assert.ok(f.stats.heartbeats >= 1);
+      if(passwordAuthenticated)assert.deepEqual(f.stats.browserUserAgents,['fixture-password-session-ua']);
       assert.equal(final.autoAttempts, 0, 'manual result never dispatches automatic gestures');
       const after = await f.runtime.store.findSession(f.session.id);
       assert.equal(after?.lastSeenAt, before?.lastSeenAt, 'presentation renewals, status snapshots and WS never extend authentication idle time');

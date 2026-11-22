@@ -17,6 +17,7 @@ import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
 import { recheckVerificationRisks } from './xianyu-verification-risk-recheck.js';
 import { recoverVerificationReads, XianyuReadRecoveryError } from './xianyu-verification-read-recovery.js';
 import { isImVerificationSource } from './xianyu-verification-request.js';
+import { xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -389,7 +390,6 @@ export class XianyuImService {
       if (!account || account.status === 'disabled' || (!account.riskEpisode && account.status !== 'verification_required')) return;
       const credential = await this.store.getCredential(adminId, accountId);
       if (this.closed || credential?.status !== 'active' || !credential.cookieHeader) return;
-      if(credential.metadata?.loginMethod==='password_http')return;
       for (const risk of await this.store.listAccountVerificationRisks(adminId, accountId)) attemptedRevisions.set(risk.source, risk.revision);
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
       // A prior browser recovery may already have restored this API. Recheck
@@ -777,7 +777,7 @@ export class XianyuImService {
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
     let token = await tokenClient.fetchImToken(adminId, account.id, deviceId);
     if (!token.success || !token.accessToken) {
-      if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && credential.metadata?.loginMethod!=='password_http' && this.verificationBrowser?.enabled && token.verificationUrl) {
+      if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = initial;
         recoveryRisks = await this.store.listAccountVerificationRisks(adminId, account.id);
         const nativeRecoveryStartedAt = new Date().toISOString();
@@ -807,6 +807,7 @@ export class XianyuImService {
               verificationSubject: { adminId, accountId: account.id, credentialGeneration: initial.generation, source: XIANYU_IM_TOKEN_API },
               profileKey: account.id,
               initialCookieSnapshot: initialSnapshot,
+              userAgent: initial.metadata?.loginMethod==='password_http' ? xianyuSessionUserAgent(initial.metadata.loginUserAgent) : undefined,
               allowManualFallback: false,
               pollIntervalMs: 250,
               imTokenRequest: { deviceId, expectedUserId: account.platformUserId ?? account.sellerRef },

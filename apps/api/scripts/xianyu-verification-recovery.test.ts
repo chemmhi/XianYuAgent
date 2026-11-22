@@ -17,17 +17,19 @@ export async function until(predicate: () => boolean | Promise<boolean>): Promis
   }
 }
 
-export async function fixture() {
+export async function fixture(loginMethod?: string) {
   const store = new MemoryStore();
   const account = await store.createAccount({ adminId: 'admin-1', platform: 'xianyu', sellerRef: 'seller-1' });
   await store.upsertCredential({ adminId: 'admin-1', accountId: account.id, platform: 'xianyu',
-    cookieHeader: 'unb=seller-1; _m_h5_tk=old_suffix', accessToken: 'cached-access', deviceId: 'device-1' });
+    cookieHeader: 'unb=seller-1; _m_h5_tk=old_suffix', accessToken: 'cached-access', deviceId: 'device-1',
+    ...(loginMethod ? { metadata: { loginMethod, loginUserAgent: 'fixture-password-session-ua' } } : {}) });
   let browserCalls = 0;
   let fail = false;
   let release: Promise<void> = Promise.resolve();
   let service: XianyuImService;
-  const browser = { enabled: true, waitForCompletion: async () => {
+  const browser = { enabled: true, waitForCompletion: async (input?:{userAgent?:string}) => {
     browserCalls++;
+    if(loginMethod==='password_http')assert.equal(input?.userAgent,'fixture-password-session-ua');
     await release;
     if (fail) throw new Error('XIANYU_VERIFICATION_AUTO_SOLVE_FAILED');
     return { finalUrl: 'https://www.goofish.com/im', cookieSnapshot: [
@@ -73,6 +75,24 @@ test('startup immediately recovers persisted verification risk despite a connect
     assert.equal(cookieSnapshotFromMetadata((await f.store.getCredential('admin-1', f.account.id))?.metadata)?.length, 3);
     // No periodic timer was advanced to make recovery happen.
   } finally { await f.service.close(); }
+});
+
+test('password-authenticated accounts automatically recover post-login verification risks',async()=>{
+  const f=await fixture('password_http');
+  try{
+    await f.risk();f.service.requestVerificationRecovery('admin-1',f.account.id,'im_listener');await f.settled();
+    assert.equal(f.browserCalls(),1);assert.equal((await f.store.getCredential('admin-1',f.account.id))?.accessToken,'native-access');
+    assert.equal((await f.store.listAccountVerificationRisks('admin-1',f.account.id)).length,0);
+  }finally{await f.service.close();}
+});
+
+test('password-authenticated IM Token challenges use the official verification continuation',async()=>{
+  const f=await fixture('password_http');
+  try{
+    const credential=await f.store.getCredential('admin-1',f.account.id);
+    await f.internal.refreshCredential('admin-1',await f.store.getAccount('admin-1',f.account.id),credential);
+    assert.equal(f.browserCalls(),1);assert.equal((await f.store.getCredential('admin-1',f.account.id))?.accessToken,'native-access');
+  }finally{await f.service.close();}
 });
 
 test('concurrent risk signals share one recovery and recursive MTOP signals cannot deadlock it', async () => {

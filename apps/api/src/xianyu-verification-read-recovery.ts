@@ -4,6 +4,7 @@ import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js
 import { createVerificationReadRequest, isImVerificationSource, resolveVerificationReadRequest } from './xianyu-verification-request.js';
 import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, normalizeCookieSnapshot, metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuBrowserStageError } from './xianyu-browser-challenge-handoff.js';
+import { xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 
 export class XianyuReadRecoveryError extends AggregateError {
   readonly code = 'XIANYU_VERIFICATION_READ_RECOVERY_FAILED';
@@ -36,6 +37,7 @@ export async function recoverVerificationReads(store: Store, mtop: XianyuMtopCli
       const completed = await browser.waitForCompletion({ verificationUrl: 'https://www.goofish.com/punish', verificationSubject: { adminId, accountId, credentialGeneration: expected.generation, source: risk.source },
         profileKey: accountId, initialCookieSnapshot: cookieSnapshotFromMetadata(expected.metadata)
           ?? headerSnapshot(expected.cookieHeader!), allowManualFallback: false,
+        userAgent: expected.metadata?.loginMethod==='password_http' ? xianyuSessionUserAgent(expected.metadata.loginUserAgent) : undefined,
         readRequest: { request: browserRequest, expectedUserId } });
       verificationSessionId = completed.verificationSessionId;
       const snapshot = normalizeCookieSnapshot(completed.cookieSnapshot) ?? [];

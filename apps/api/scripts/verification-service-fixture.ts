@@ -13,7 +13,7 @@ import { sha256, hashPassword } from '../src/security.js';
 import { PostgresStore } from '../src/store-postgres.js';
 
 /** Controlled platform only. All production service/HTTP/WS/Chrome paths remain real. */
-export async function createVerificationServiceFixture(options: { databaseUrl?: string; webOrigin?: string; nativeChallenge?: boolean; rejectFirstSlide?: boolean; nativeFrontend?: boolean } = {}) {
+export async function createVerificationServiceFixture(options: { databaseUrl?: string; webOrigin?: string; nativeChallenge?: boolean; rejectFirstSlide?: boolean; nativeFrontend?: boolean; passwordAuthenticated?: boolean } = {}) {
   if (options.nativeFrontend && !options.nativeChallenge) throw new Error('nativeChallenge is required for native frontend fixture');
   if (options.rejectFirstSlide && !options.nativeChallenge) throw new Error('nativeChallenge is required for rejection/reset fixture');
   if (options.databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(options.databaseUrl).hostname)
@@ -21,7 +21,7 @@ export async function createVerificationServiceFixture(options: { databaseUrl?: 
   const profile = await mkdtemp(join(tmpdir(), 'verification-service-'));
   const gateway = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(gateway, 'listening');
   const gatewayPort = (gateway.address() as { port: number }).port;
-  const stats = { browserLaunches: 0, slideAnswers: 0, registrations: 0, heartbeats: 0, serverTokenRequests: 0, browserTokenRequests: 0, pointerDowns: 0, refreshes: 0 };
+  const stats = { browserLaunches: 0, slideAnswers: 0, registrations: 0, heartbeats: 0, serverTokenRequests: 0, browserTokenRequests: 0, pointerDowns: 0, refreshes: 0, browserUserAgents:[] as Array<string|undefined> };
   let accepted = false; const contexts: BrowserContext[] = [];
   const approved = (cookie = '') => options.nativeFrontend
     ? /(?:^|;)\s*x5sec=native-frontend-passed(?:;|$)/.test(cookie) && /(?:^|;)\s*x5sectag=fixture-context(?:;|$)/.test(cookie) : accepted;
@@ -68,6 +68,7 @@ export async function createVerificationServiceFixture(options: { databaseUrl?: 
     imClientFactory: input => new XianyuImClient({ ...input, webSocketFactory: () => new WebSocket(`ws://127.0.0.1:${gatewayPort}`) as never }),
     verificationBrowserFactory: { launchPersistentContext: async launch => {
       stats.browserLaunches++;
+      stats.browserUserAgents.push(launch.userAgent);
       const context = await factory.launchPersistentContext(launch); const raw = context as unknown as BrowserContext; contexts.push(raw);
       await raw.route('**/*', async route => {
         const url = new URL(route.request().url());
@@ -96,7 +97,8 @@ export async function createVerificationServiceFixture(options: { databaseUrl?: 
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `fixture-${randomUUID()}`, displayName: '受控验证账号' });
   // The platform identity is stable and separate from the unique DB seller key.
   await runtime.store.updateAccount(admin.id, account.id, { platformUserId: 'seller-1' });
-  await runtime.store.upsertCredential({ adminId: admin.id, accountId: account.id, platform: 'xianyu', cookieHeader: `unb=seller-1; _m_h5_tk=fixture_suffix${options.nativeFrontend ? '; x5sectag=fixture-context' : ''}`, deviceId: 'device-1', accessToken: 'old-access' });
+  await runtime.store.upsertCredential({ adminId: admin.id, accountId: account.id, platform: 'xianyu', cookieHeader: `unb=seller-1; _m_h5_tk=fixture_suffix${options.nativeFrontend ? '; x5sectag=fixture-context' : ''}`, deviceId: 'device-1', accessToken: 'old-access',
+    ...(options.passwordAuthenticated ? {metadata:{loginMethod:'password_http',loginUserAgent:'fixture-password-session-ua'}} : {}) });
   await runtime.store.recordAccountRisk({ adminId: admin.id, accountId: account.id, source: XIANYU_IM_TOKEN_API, code: 'ACCOUNT_VALIDATION_REQUIRED' });
   await runtime.listen();
   const baseUrl = `http://127.0.0.1:${(runtime.server.address() as { port: number }).port}`;
