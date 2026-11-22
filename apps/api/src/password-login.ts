@@ -4,7 +4,7 @@ import { AccountService, AuthService, CredentialService, ServiceError } from './
 import type { PasswordLoginTransport } from './password-login-port.js';
 import type { PasswordLoginSecret } from './password-login-repository.js';
 import { PasswordLoginVault } from './password-login-vault.js';
-import { cookieHeaderForUrl, metadataWithCookieSnapshot, cookieSnapshotFromMetadata } from './xianyu-cookie-jar.js';
+import { cookieHeaderForUrl, metadataWithCookieSnapshot, cookieSnapshotFromMetadata, XIANYU_TOP_SITE } from './xianyu-cookie-jar.js';
 import { PasswordHttpVerificationRequired } from './xianyu-password-http.js';
 import { passwordClientInfo, type PasswordClientInfo, type PasswordHttpProof } from './password-login-client.js';
 import { passwordVerificationPresentation } from './password-verification.js';
@@ -252,7 +252,7 @@ export class PasswordLoginService {
       const before = await this.vault.repository.get(entry.adminId, account.id);
       const saved = await this.credentials.save({ adminId: entry.adminId, accountId: account.id,
         expectedGeneration: entry.generation ?? account.credentialGeneration ?? 1,
-        cookieHeader: cookieHeaderForUrl(result.cookieSnapshot, 'https://www.goofish.com/'),
+        cookieHeader: cookieHeaderForUrl(result.cookieSnapshot, 'https://www.goofish.com/', Date.now(), XIANYU_TOP_SITE),
         accessToken:result.accessToken,deviceId:result.deviceId,
         metadata: metadataWithCookieSnapshot({ unb: result.unb, loginMethod: 'password_http',...((result.clientInfo??input.clientInfo)?{loginUserAgent:(result.clientInfo??input.clientInfo)!.userAgent}:{}) }, result.cookieSnapshot),
         clearAccessToken: true, clearExpiresAt: true, requestId: id, traceId: id });

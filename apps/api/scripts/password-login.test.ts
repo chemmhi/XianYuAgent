@@ -11,6 +11,7 @@ import { PasswordReloginWorker } from '../src/password-relogin-worker.js';
 import { classifyPasswordLoginResponse, safeChallengeUrl } from '../src/xianyu-password-response.js';
 import type { PasswordLoginTransport, PasswordLoginInput } from '../src/password-login-port.js';
 import { PasswordHttpVerificationRequired } from '../src/xianyu-password-http.js';
+import { cookieSnapshotFromMetadata, XIANYU_TOP_SITE } from '../src/xianyu-cookie-jar.js';
 
 const deferred = <T = void>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; };
 async function until<T>(read: () => Promise<T>, check: (value: T) => boolean) {
@@ -59,6 +60,21 @@ test('successful password login revives expired authorization, clears old expiry
     assert.deepEqual(f.vault.open(row), { account: 'fixture-phone', password: 'fixture-password' });
     assert.throws(() => f.vault.open({ ...row, accountId: randomUUID() }), /PASSWORD_SECRET_INVALID/);
   } finally { await f.login.close(); }
+});
+test('password login persists the selected partition credentials for IM without flattening foreign partitions',async()=>{
+  const snapshot=[
+    {name:'unb',value:'fixture-seller',domain:'.goofish.com',path:'/'},
+    {name:'cookie2',value:'valid-session',domain:'.goofish.com',path:'/'},
+    {name:'_m_h5_tk',value:'foreign_9999999999999',domain:'.goofish.com',path:'/',partitionKey:'https://other.test'},
+    {name:'_m_h5_tk',value:'selected_9999999999999',domain:'.goofish.com',path:'/',partitionKey:XIANYU_TOP_SITE},
+  ];
+  const f=await fixture({run:async input=>({unb:'fixture-seller',profileKey:input.profileKey,usedPassword:true,cookieSnapshot:snapshot,accessToken:'fixture-im-token'})});
+  try{
+    const session=await f.create();assert.equal((await f.finish(session.id)).status,'succeeded');
+    const credential=(await f.store.getCredential(f.admin.id,f.account.id))!;
+    assert.match(credential.cookieHeader!,/_m_h5_tk=selected_/);assert.doesNotMatch(credential.cookieHeader!,/foreign_/);
+    assert.equal(credential.accessToken,'fixture-im-token');assert.deepEqual(cookieSnapshotFromMetadata(credential.metadata),snapshot);
+  }finally{await f.login.close();}
 });
 for (const automatic of [false, true]) test(`unavailable verification fails visibly instead of leaving an unresumable waiting session (automatic=${automatic})`,async()=>{
   const f=await fixture({run:async()=>{throw new PasswordHttpVerificationRequired();}});

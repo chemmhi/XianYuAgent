@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createServer as tcpServer } from 'node:net';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { randomUUID, generateKeyPairSync } from 'node:crypto';
+import { randomUUID, generateKeyPairSync, createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -49,7 +49,15 @@ const platform = createServer(async (req, res) => {
     return res.end(JSON.stringify({ content: { success: true, data: { resultCode: 100 } }, hasError: false }));
 
   }
-  if(req.url?.startsWith('/h5/')){cookieChecks++;res.setHeader('content-type','application/json');if(!req.headers.cookie?.includes('_m_h5_tk=')){res.setHeader('set-cookie','_m_h5_tk=fixture_9999999999999; Domain=.goofish.com; Path=/; Secure');return res.end(JSON.stringify({ret:['FAIL_SYS_TOKEN_EXPIRED::refresh']}));}return res.end(JSON.stringify({ret:['SUCCESS::OK'],data:req.url.includes('pc.login.token')?{accessToken:'fixture-im-access-token'}:{userId:'880000009901'}}));}
+  if(req.url?.startsWith('/h5/')){
+    cookieChecks++;res.setHeader('content-type','application/json');
+    let body='';for await(const chunk of req)body+=chunk;
+    const url=new URL(req.url,'https://h5api.m.goofish.com'),token=req.headers.cookie?.split(/;\s*/).find(c=>c.startsWith('_m_h5_tk='))?.slice('_m_h5_tk='.length).split('_')[0],data=new URLSearchParams(body).get('data');
+    const expected=createHash('md5').update(`${token}&${url.searchParams.get('t')}&34839810&${data}`).digest('hex');
+    if(url.searchParams.get('sign')!==expected)return res.end(JSON.stringify({ret:['FAIL_SYS_ILLEGAL_ACCESS::signature does not match actual Cookie'],data:{}}));
+    if(!token){res.setHeader('set-cookie','_m_h5_tk=fixture_9999999999999; Domain=.goofish.com; Path=/; Secure; SameSite=None; Partitioned');return res.end(JSON.stringify({ret:['FAIL_SYS_TOKEN_EXOIRED::refresh']}));}
+    return res.end(JSON.stringify({ret:['SUCCESS::OK'],data:req.url.includes('pc.login.token')?{accessToken:'fixture-im-access-token'}:{userId:'880000009901'}}));
+  }
   res.end('{}');
 });
 platform.listen(0, '127.0.0.1'); await once(platform, 'listening');
@@ -215,7 +223,8 @@ try {
   await runtime.close(); runtime=createApp(config,{passwordTransport:browser});runtime.xianyuIm.startListener=async()=>undefined;runtime.xianyu.fetchProfile=async()=>({success:true,accountInvalid:false,response:{userId:'880000009901',nickname:'密码登录端到端账号'}});
   const current=await runtime.store.getCredential(admin.id,account.id);await runtime.store.markCredentialVerified({adminId:admin.id,accountId:account.id,status:'expired',expected:current});
   const restored=await runtime.passwordLogin.vault.repository.get(admin.id,account.id);await runtime.passwordLogin.recover(restored);
-  assert.equal((await runtime.store.getCredential(admin.id,account.id)).status,'active');assert.ok(cookieChecks>=2);
+  const recovered=await runtime.store.getCredential(admin.id,account.id);
+  assert.equal(recovered.status,'active');assert.match(recovered.cookieHeader,/_m_h5_tk=fixture_/);assert.ok(cookieChecks>=2);
   assert.equal(submissions,verificationMode?5:3,'restart recovery performs another password login via HTTP');
   await writeFile(join(evidence,'result.json'),JSON.stringify({browser:'Chrome/CDP',database:'isolated PostgreSQL',externalPlatform:'local login contract fixture',reactForm:true,independentVerificationDialog:verificationMode,expiredAccountRestored:true,encryptedPasswordSaved:true,restartRecovery:true,realGoofishAcceptance:false,realImRegistration:false},null,2));
   console.log('Password login product DOM -> API -> PostgreSQL -> DOM and restart recovery PASS; external platform is a local contract fixture');
