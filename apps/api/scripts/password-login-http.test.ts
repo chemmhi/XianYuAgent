@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { constants, generateKeyPairSync, privateDecrypt } from 'node:crypto';
+import { constants, createHash, generateKeyPairSync, privateDecrypt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { encryptXianyuPassword, loginJsonAssignment } from '../src/xianyu-password-protocol.js';
@@ -21,7 +21,7 @@ test('official RSA contract uses random PKCS#1 v1.5 padding, even hex and UTF-16
   assert.deepEqual(loginJsonAssignment('window.x={"nested":{"text":"}\\\"{"}};alert(1)','window.x'),{nested:{text:'}"{'}});
   assert.throws(()=>loginJsonAssignment('window.x={malicious()}','window.x'),/BOOTSTRAP_INVALID/);
 });
-for(const scenario of ['success','wrong-password','challenge-with-100','captcha-with-100','html-challenge','mixed-ret','success-with-challenge','http-error-success','identity-mismatch','exchange-redirect','untrusted-redirect','scoped-token','manual-verification'] as const)test(`real HTTP login contract: ${scenario}`,async()=>{
+for(const scenario of ['success','wrong-password','challenge-with-100','captcha-with-100','html-challenge','mixed-ret','success-with-challenge','http-error-success','identity-mismatch','exchange-redirect','untrusted-redirect','scoped-token','manual-verification','partitioned-token','bootstrap-signature','token-exoired'] as const)test(`real HTTP login contract: ${scenario}`,async()=>{
   let initialization=0,submissions=0,identityCalls=0;const seen: Array<{url:string;body:string}>=[];
   const server=createServer(async(req,res)=>{
     res.setHeader('content-type','application/json');
@@ -49,9 +49,18 @@ for(const scenario of ['success','wrong-password','challenge-with-100','captcha-
       return res.end(JSON.stringify({content:{success:scenario!=='wrong-password',data},hasError:false}));
     }
     if(req.url?.startsWith('/h5/')){
+      if(['partitioned-token','bootstrap-signature','token-exoired'].includes(scenario)){
+        let body='';for await(const chunk of req)body+=chunk;
+        const url=new URL(req.url,'https://h5api.m.goofish.com'),data=new URLSearchParams(body).get('data')!,token=req.headers.cookie?.split(/;\s*/).find(c=>c.startsWith('_m_h5_tk='))?.slice('_m_h5_tk='.length).split('_')[0];
+        const expected=createHash('md5').update(`${token}&${url.searchParams.get('t')}&34839810&${data}`).digest('hex');
+        if(url.searchParams.get('sign')!==expected)return res.end(JSON.stringify({ret:['FAIL_SYS_ILLEGAL_ACCESS::signature does not match actual Cookie'],data:{}}));
+        if(scenario==='token-exoired'&&identityCalls===0&&!req.url.includes('pc.login.token')){
+          identityCalls++;res.setHeader('set-cookie','_m_h5_tk=rotated_9999999999999; Domain=.goofish.com; Path=/; Secure');return res.end(JSON.stringify({ret:['FAIL_SYS_TOKEN_EXOIRED::refresh']}));
+        }
+      }
       if(req.url.includes('pc.login.token'))return res.end(JSON.stringify({ret:['SUCCESS::OK'],data:{accessToken:'fixture-im-access-token'}}));
       identityCalls++;
-      if(!req.headers.cookie?.includes('_m_h5_tk=')){res.setHeader('set-cookie',`_m_h5_tk=fixturetoken_9999999999999; ${scenario==='scoped-token'?'Path=/h5/':'Domain=.goofish.com; Path=/'}; Secure`);return res.end(JSON.stringify({ret:['FAIL_SYS_TOKEN_EXPIRED::refresh']}));}
+      if(!req.headers.cookie?.includes('_m_h5_tk=')){res.setHeader('set-cookie',`_m_h5_tk=fixturetoken_9999999999999; ${scenario==='scoped-token'?'Path=/h5/':'Domain=.goofish.com; Path=/'}; Secure${scenario==='bootstrap-signature'?'; SameSite=None; Partitioned':''}`);return res.end(JSON.stringify({ret:[`FAIL_SYS_TOKEN_${scenario==='bootstrap-signature'?'EMPTY':'EXPIRED'}::refresh`]}));}
       if(scenario==='http-error-success')res.statusCode=403;
       const ret=scenario==='mixed-ret'?['SUCCESS::OK','FAIL_SYS_USER_VALIDATE::security']:['SUCCESS::OK'];
       assert.match(req.headers.cookie,/cookie2=valid-session/);return res.end(JSON.stringify({ret,data:{userId:scenario==='identity-mismatch'?'someone-else':'fixture-seller',...(scenario==='success-with-challenge'?{verificationUrl:'https://www.goofish.com/punish'}:{})}}));
@@ -60,6 +69,11 @@ for(const scenario of ['success','wrong-password','challenge-with-100','captcha-
     res.end('{}');
   });server.listen(0,'127.0.0.1');await once(server,'listening');const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const input: PasswordLoginInput={account:'fixture-user',password:'fixture-password',profileKey:'11111111-1111-4111-8111-111111111111',expectedUserId:'fixture-seller',signal:new AbortController().signal,assertActive:async()=>undefined,};
+  if(scenario==='partitioned-token')input.initialCookieSnapshot=[
+    {name:'_m_h5_tk',value:'foreign_9999999999999',domain:'.goofish.com',path:'/',secure:true,partitionKey:'https://other.test'},
+    {name:'_m_h5_tk',value:'partitioned_9999999999999',domain:'.goofish.com',path:'/',secure:true,partitionKey:'https://goofish.com'},
+  ];
+  if(scenario==='token-exoired')input.initialCookieSnapshot=[{name:'_m_h5_tk',value:'old_9999999999999',domain:'.goofish.com',path:'/',secure:true}];
   if(scenario==='manual-verification')input.onHttpVerification=async url=>{assert.equal(submissions,1);assert.equal(initialization,1);assert.equal(new URL(url).host,'passport.goofish.com');return {value:'fixture-proof',host:'passport.goofish.com',expiresAt:Date.now()+60_000};};
   const adapter=new XianyuPasswordHttp({request:async(url,init)=>{const target=new URL(String(url));seen.push({url:target.origin+target.pathname,body:String(init?.body??'')});return fetch(origin+target.pathname+target.search,init);}});
   try {
@@ -68,7 +82,7 @@ for(const scenario of ['success','wrong-password','challenge-with-100','captcha-
     else if(scenario==='http-error-success')await assert.rejects(adapter.run(input),/HTTP_RESPONSE_UNSUPPORTED/);
     else if(scenario==='identity-mismatch')await assert.rejects(adapter.run(input),/PASSWORD_ACCOUNT_MISMATCH/);
     else if(scenario==='untrusted-redirect'){await assert.rejects(adapter.run(input),/EXCHANGE_UNSUPPORTED/);assert.equal(seen.some(r=>r.url.includes('evil.test')),false);}
-    else{const result=await adapter.run(input);assert.equal(result.unb,'fixture-seller');assert.equal(result.usedPassword,true);assert.ok(result.cookieSnapshot.some(c=>c.name==='cookie2'&&c.httpOnly));assert.equal(identityCalls,2);}
+    else{const result=await adapter.run(input);assert.equal(result.unb,'fixture-seller');assert.equal(result.usedPassword,true);assert.ok(result.cookieSnapshot.some(c=>c.name==='cookie2'&&c.httpOnly));assert.equal(identityCalls,scenario==='partitioned-token'?1:2);}
     assert.equal(initialization,1);assert.equal(submissions,scenario==='manual-verification'?2:1);
   }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });

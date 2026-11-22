@@ -125,7 +125,7 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
       const config=loginJsonAssignment(html,'window.viewConfig'), data=loginJsonAssignment(html,'window.viewData'), form=loginFormFields(data.loginFormData);
       if (!form._csrf_token || !form.umidToken) throw new Error('PASSWORD_LOGIN_BOOTSTRAP_INVALID');
       const password2=encryptXianyuPassword(input.password,String(config.rsaModulus??''),String(config.rsaExponent??''));
-      const cna=cookieValue(jar,'cna',endpoints.home), trace=/name=["']eagleeye-trace["'][^>]*content=["']([^"']+)/i.exec(html)?.[1]??'';
+      const cna=cookieValue(jar,'cna',endpoints.home,XIANYU_TOP_SITE), trace=/name=["']eagleeye-trace["'][^>]*content=["']([^"']+)/i.exec(html)?.[1]??'';
       const jsVersion=/havana-nlogin\/([0-9.]+)\//.exec(html)?.[1];
       if(!jsVersion)throw new Error('PASSWORD_LOGIN_BOOTSTRAP_VERSION_MISSING');
       const body = new URLSearchParams({loginId:input.account,password2,keepLogin:'false',isIframe:'true',documentReferer:endpoints.home,defaultView:'password',
@@ -165,7 +165,7 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
       }
       if(login.replace)throw new Error('PASSWORD_SESSION_EXCHANGE_UNSUPPORTED');
       for(const name of ['redirectUrl','parentRedirectUrl'] as const)if(typeof login[name]==='string')await exchange(allowed(login[name] as string,endpoints.mini));
-      const unb=cookieValue(jar,'unb',endpoints.home);
+      const unb=cookieValue(jar,'unb',endpoints.home,XIANYU_TOP_SITE);
       if(!unb)throw new Error('PASSWORD_SESSION_COOKIE_MISSING');
       if(input.expectedUserId && input.expectedUserId!==unb)throw new Error('PASSWORD_ACCOUNT_MISMATCH');
       // Refresh the H5 signing token through MTOP itself and validate the authenticated identity.
@@ -173,14 +173,16 @@ export class XianyuPasswordHttp implements PasswordLoginTransport {
       const version='1.0';
       for(let attempt=0;attempt<3;attempt++) {
         const mtopUrl=`${endpoints.mtop}${api}/${version}/`;
-        const timestamp=String(Date.now()), token=cookieValue(jar,'_m_h5_tk',mtopUrl).split('_')[0];
+        // Match the first Cookie sent by http(), including the official top-site partition.
+        // The official MTOP SDK stringifies a missing token as "undefined" during bootstrap.
+        const timestamp=String(Date.now()), token=cookieValue(jar,'_m_h5_tk',mtopUrl,XIANYU_TOP_SITE).split('_')[0]||undefined;
         const params=new URLSearchParams({jsv:'2.7.2',appKey:'34839810',t:timestamp,sign:createHash('md5').update(`${token}&${timestamp}&34839810&${requestData}`).digest('hex'),v:version,type:'originaljson',accountSite:'xianyu',dataType:'json',timeout:'20000',api,sessionOption:'AutoLoginOnly',needLogin:'false'});
         const check=await http(`${endpoints.mtop}${api}/${version}/?${params}`,{method:'POST',headers:{accept:'application/json','content-type':'application/x-www-form-urlencoded',origin:new URL(endpoints.home).origin,referer:endpoints.home},body:new URLSearchParams({data:requestData}).toString()});
         const checked=await json(check,mtopUrl), ret=Array.isArray(checked.ret)?checked.ret.map(String):[];
         const classified=classifyPasswordLoginResponse(checked);
         if(classified.kind==='verification_required')throw new PasswordHttpVerificationRequired(classified.url);
         if(ret.length&&ret.every(r=>r.startsWith('SUCCESS::')))return record(checked.data);
-        if(!ret.some(r=>/TOKEN.*EXPIRED|TOKEN.*EMPTY|TOKEN.*ILLEGAL/.test(r)))throw new Error('PASSWORD_SESSION_VERIFY_FAILED');
+        if(!ret.some(r=>/^FAIL_SYS_TOKEN_(?:EXPIRED|EXOIRED|EMPTY|ILLEGAL)(?:::|$)/.test(r)))throw new Error('PASSWORD_SESSION_VERIFY_FAILED');
       }
       throw new Error('PASSWORD_SESSION_VERIFY_FAILED');
       });

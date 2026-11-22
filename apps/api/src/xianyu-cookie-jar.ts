@@ -101,8 +101,8 @@ export function cookieHeaderFromSnapshot(snapshot: XianyuCookieSnapshot | undefi
   return result.join('; ');
 }
 
-export function cookieValue(snapshot: XianyuCookieSnapshot | undefined, name: string, rawUrl?: string): string {
-  const header = rawUrl ? cookieHeaderForUrl(snapshot, rawUrl) : cookieHeaderFromSnapshot(snapshot);
+export function cookieValue(snapshot: XianyuCookieSnapshot | undefined, name: string, rawUrl?: string, partitionKey?: string): string {
+  const header = rawUrl ? cookieHeaderForUrl(snapshot, rawUrl, Date.now(), partitionKey) : cookieHeaderFromSnapshot(snapshot);
   for (const part of header.split(';')) {
     const [key, ...rest] = part.trim().split('=');
     if (key === name) return rest.join('=');

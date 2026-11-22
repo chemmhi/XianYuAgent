@@ -31,3 +31,15 @@
 ## 发布与回滚
 
 按 PR-only 合入 main，再使用腾讯云既有统一部署入口。稳定加密密钥、设备目录和数据库均保留；不导入本地验收凭证。回滚通过 revert PR 恢复本次代码，无需逆向迁移。生产验证码仍由用户按官方提示完成；实际发布及真实挑战续接结果另据现场记录，本文不提前声称生产账号已恢复。
+
+## 生产复测更正：分区 Cookie 与签名不一致
+
+PR [#4](https://github.com/chemmhi/XianYuAgent/pull/4) 合并为 `7826ff0b8497a8cf166bc45192666ba5b8065028`，[Actions 44974308622](https://github.com/chemmhi/XianYuAgent/actions/runs/44974308622) 成功。腾讯云与公开健康检查正常，前端已加载单按钮与账号回填。但用户 10:13、10:14 +08:00 的两次真实提交仍落库 PASSWORD_VERIFICATION_UNAVAILABLE；以上确认续接修复不足以证明生产恢复。
+
+后续持账号租约的受控诊断发现：官方密码接口已返回 processFinished=true、resultCode=100，无 dialogAction 或验证地址；首次 loginuser MTOP 返回 FAIL_SYS_ILLEGAL_ACCESS，同时下发 Partitioned 的 H5 Token。仅刷新一次身份请求的 Token 可获得 SUCCESS，随后 IM 换票又重复失败。
+
+确定的根因是 cookieValue(snapshot,name,url) 未传顶级站点，排除了分区 Token；HTTP 实际发送的 Cookie 使用 XIANYU_TOP_SITE，包含该 Token。两次只读 MTOP 的签名与实际 Cookie 均不匹配。另一次诊断只用实际 Cookie 中首个 Token 重算签名，不更换密码、不解验证码、不改响应或数据库：loginuser 与 pc.login.token 均真实返回 SUCCESS，目标身份匹配并取得 accessToken。这是传输层诊断成功，不等于应用凭证已保存或生产 IM 已连接。
+
+正式修复同时给密码链路的 cna、unb、H5 Token 读取及最终 flat Cookie 保存传入同一顶级站点；完整快照继续保留域、路径和分区属性，不跨站合并。无 Token 的 bootstrap 按官方 SDK 使用 undefined 字符串参与签名；兼容官方 TOKEN_EXOIRED 拼写，仅明确 Token 错误重签原 MTOP，不增加 ILLEGAL_ACCESS 泛化重试。
+
+新增三个真实 HTTP 回归（分区 Token、无 Token 签名、EXOIRED）在旧代码全部失败；新增持久化分区凭证用例在旧代码失败。修复后密码/HTTP/IV/SDK 80/80 通过，独立复核亦 80/80，通过完整 API 回归、API typecheck/build、Cookie jar smoke、PG 专项 1/1。Chrome/CDP→正式页面/API→独立 PG→页面及重启恢复 E2E 通过；外部契约夹具现校验实际 Cookie 与 MD5 签名，Token 以 Partitioned 下发，避免无签名校验的夹具掩盖本次问题。本补丁不修改前端，生产完整登录与心跳仍需部署后核验。
