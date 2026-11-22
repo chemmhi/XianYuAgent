@@ -25,6 +25,7 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
+COPY config ./config
 COPY THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
 COPY licenses ./licenses
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
@@ -33,6 +34,7 @@ RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod 755 ./docker-entrypoint.sh
 # production deploys can migrate the existing PostgreSQL volume before the
 # API/Worker processes start serving new code.
 COPY scripts/migrate.mjs ./scripts/migrate.mjs
+COPY scripts/check-system-users.mjs ./scripts/check-system-users.mjs
 COPY scripts/verify-delivery-cutover.mjs ./scripts/verify-delivery-cutover.mjs
 COPY scripts/purge-deleted-account.mjs ./scripts/purge-deleted-account.mjs
 COPY scripts/cleanup-retained-records.mjs ./scripts/cleanup-retained-records.mjs

@@ -151,6 +151,7 @@ trap on_exit EXIT
 
 cd "$APP_DIR" || fail "找不到部署目录: $APP_DIR"
 [[ -f "$COMPOSE_FILE" ]] || fail "找不到 Compose 文件: $APP_DIR/$COMPOSE_FILE"
+bash scripts/initialize-runtime-config.sh "$APP_DIR"
 
 if [[ "$COMPOSE_FILE" != "compose.prod.yml" && "${ALLOW_NONPROD_COMPOSE:-0}" != "1" ]]; then
   fail "生产部署必须显式使用 compose.prod.yml；如确需覆盖，请设置 ALLOW_NONPROD_COMPOSE=1"
@@ -181,6 +182,7 @@ docker compose -f "$COMPOSE_FILE" up "${infra_up_args[@]}" \
   postgres redis object-storage
 wait_for_postgres
 docker compose -f "$COMPOSE_FILE" build api worker
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps api node scripts/check-system-users.mjs
 docker compose -f "$COMPOSE_FILE" run --rm --no-deps api test -f scripts/verify-delivery-cutover.mjs \
   || fail 'API 镜像缺少发货切换核验脚本，旧服务保持运行'
 delivery_preflight() {

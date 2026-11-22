@@ -1520,6 +1520,7 @@ export interface Store {
   persistAutoReplyOutbox(input: { id: string; outboundMessageId: string }): Promise<boolean>;
   retryAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean>;
   deadLetterAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean>;
+  suppressPendingAutoReplyOutbox(input: { adminId: string; runId: string; errorCode: string }): Promise<number>;
   recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void>;
   cleanupAuditEvents(input: { createdBefore: string; limit?: number }): Promise<number>;
   listAgentSessions(adminId: string, query?: { accountId?: string; search?: string }): Promise<AgentSessionRecord[]>;

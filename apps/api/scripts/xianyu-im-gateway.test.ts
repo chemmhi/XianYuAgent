@@ -349,6 +349,22 @@ test('message send 401 refreshes the IM token and retries once on a new socket',
   }
 });
 
+test('AI pre-send fence is rerun after authentication reconnect before another socket write', async () => {
+  const sockets: AuthRefreshSocket[] = [];
+  let refreshed = false;
+  const client = new XianyuImClient({ accountId: 'account-1', credential: { cookieHeader: 'unb=seller-1', accessToken: 'old-token' },
+    refreshCredential: async () => { refreshed = true; return { cookieHeader: 'unb=seller-1', accessToken: 'new-token' }; },
+    webSocketFactory: () => { const socket = new AuthRefreshSocket(false, sockets.length === 0); sockets.push(socket); queueMicrotask(() => socket.emit('open')); return socket; },
+  });
+  try {
+    await client.connect();
+    await assert.rejects(() => client.sendText('conv', '1400', 'AI', 'fenced', () => { if (refreshed) throw new Error('XIANYU_SYSTEM_USER_IGNORED'); }), /XIANYU_SYSTEM_USER_IGNORED/);
+    assert.equal(sockets[0]?.sendAttempts, 1);
+    assert.equal(sockets[1]?.sendAttempts, 0);
+    assert.equal(client.connected, true);
+  } finally { await client.disconnect(); }
+});
+
 test('message business rejection marks the IM client failed', async () => {
   const socket = new BusinessRejectSocket();
   const statuses: string[] = [];

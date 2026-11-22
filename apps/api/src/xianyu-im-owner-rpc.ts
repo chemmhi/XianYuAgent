@@ -6,10 +6,10 @@ import { XianyuImSendNotStartedError, type XianyuImService } from './xianyu-im-s
 
 export const IM_OWNER_RPC_PATH = '/internal/xianyu-im/v1';
 const METHODS = ['isReady', 'startListener', 'resetClient', 'deleteAccountState', 'listConversations', 'listMessages',
-  'markConversationRead', 'recoverRecentMessages', 'verifyPartialDeliveryImage', 'sendExternalText', 'sendText', 'sendImage'] as const;
+  'markConversationRead', 'recoverRecentMessages', 'verifyPartialDeliveryImage', 'sendExternalText', 'sendAutoReplyText', 'sendText', 'sendImage'] as const;
 type Method = typeof METHODS[number];
 type Operations = Pick<XianyuImService, Method>;
-const SEND_METHODS = new Set<Method>(['sendExternalText', 'sendText', 'sendImage']);
+const SEND_METHODS = new Set<Method>(['sendExternalText', 'sendAutoReplyText', 'sendText', 'sendImage']);
 const MAX_BODY_BYTES = 15 * 1024 * 1024;
 const AUTH_WINDOW_MS = 60_000;
 

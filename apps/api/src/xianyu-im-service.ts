@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertXianyuSystemUserPoolReady, isXianyuSystemUser, XIANYU_SYSTEM_USER_IGNORED } from './xianyu-system-users.js';
 import type { AccountRecord, AccountVerificationRisk, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
@@ -175,6 +176,11 @@ export class XianyuImService {
     return this.withSendLock(accountId, conversationId, () => this.sendExternalTextLocked(adminId, accountId, conversationId, text, requestId, traceId));
   }
 
+  async sendAutoReplyText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<{ externalMessageRef?: string }> {
+    if (this.ownerClient) return this.ownerClient.call('sendAutoReplyText', [adminId, accountId, conversationId, text, requestId, traceId]);
+    return this.withSendLock(accountId, conversationId, () => this.sendExternalTextLocked(adminId, accountId, conversationId, text, requestId, traceId, true));
+  }
+
   private async withSendLock<T>(accountId: string, conversationId: string, work: () => Promise<T>): Promise<T> {
     let entered = false;
     try {
@@ -186,17 +192,21 @@ export class XianyuImService {
     }
   }
 
-  private async sendExternalTextLocked(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<{ externalMessageRef?: string }> {
+  private async sendExternalTextLocked(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string, autoReply = false): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     if (!normalizedText) throw new ServiceError(422, 'VALIDATION_FAILED', 'text is required');
     const conversation = await prepareImSend(() => this.getConversation(adminId, accountId, conversationId));
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new XianyuImSendNotStartedError(new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu'));
     let client = await prepareImSend(() => this.ensureClient(adminId, accountId));
+    const beforeSend = autoReply ? () => {
+      try { assertXianyuSystemUserPoolReady(); } catch { throw new ServiceError(503, 'SYSTEM_USERS_CONFIG_UNAVAILABLE', 'System user configuration unavailable'); }
+      if (isXianyuSystemUser(conversation.buyerRef)) throw new ServiceError(409, XIANYU_SYSTEM_USER_IGNORED, 'AI replies to system users are disabled');
+    } : undefined;
     const startedAt = new Date().toISOString();
     let sent: { externalMessageRef?: string };
     try {
-      sent = await this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+      sent = await this.withAccountFailure(adminId, accountId, () => { beforeSend?.(); return client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId, beforeSend); });
     } catch (error) {
       if (isAmbiguousImSendError(error)) {
         const recovered = await this.reconcileOutboundSend(adminId, accountId, externalRef, { bodyType: 'text', content: normalizedText, startedAt });
@@ -209,7 +219,7 @@ export class XianyuImService {
       // Refresh once inside bootstrap: a cached token can survive a rejected
       // send, but a second token request can immediately issue another challenge.
       client = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: isValidationTextSendError(error) });
-      sent = await this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+      sent = await this.withAccountFailure(adminId, accountId, () => { beforeSend?.(); return client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId, beforeSend); });
     }
     if (!sent.externalMessageRef) {
       const recovered = await this.reconcileOutboundSend(adminId, accountId, externalRef, { bodyType: 'text', content: normalizedText, startedAt });
@@ -996,9 +1006,8 @@ export class XianyuImService {
       if (!account || account.status === 'disabled' || (expectedGeneration !== undefined && account.credentialGeneration !== expectedGeneration)) return;
       const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
       const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
-      // A local credential fence stops an obsolete task after reauthorization;
-      // it provides no evidence that the replacement session is unhealthy.
-      if (normalizedCode === 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED') return;
+      // Local credential/policy fences provide no evidence of platform session failure.
+      if (normalizedCode === 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED' || normalizedCode === XIANYU_SYSTEM_USER_IGNORED || normalizedCode === 'SYSTEM_USERS_CONFIG_UNAVAILABLE') return;
       const classification = classifyXianyuFailure({ errorCode: normalizedCode });
       if (classification.kind === 'verification_required') {
         await this.store.recordAccountRisk({ adminId, accountId, code: normalizedCode.slice(0, 120), source, expectedGeneration });
@@ -1228,6 +1237,9 @@ export class XianyuImService {
     message: { bodyType: 'text' | 'image' | 'system'; bodyText?: string; senderRef?: string; itemRef?: string; platformSystemMessage?: boolean; riskFlags?: string[] },
   ): Promise<{ bodyType: 'text' | 'image' | 'system'; riskFlags?: string[] }> {
     const baseRiskFlags = [...new Set(message.riskFlags ?? [])];
+    if (isXianyuSystemUser(message.senderRef)) {
+      return { bodyType: 'system', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_message') };
+    }
     if (message.bodyType !== 'text' || !message.platformSystemMessage) {
       return { bodyType: message.bodyType, riskFlags: baseRiskFlags.length > 0 ? baseRiskFlags : undefined };
     }
@@ -1378,7 +1390,7 @@ function normalizeHistoryMessage(value: unknown, myId: string | readonly string[
   const bodyRef = content.images[0];
   const itemRef = firstString([extension, message], ['itemId', 'itemID', 'itemRef']);
   const platformSystemMessage = hasXianyuStructuredSystemMarker(model, message, extension, custom);
-  const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
+  const bodyType = isXianyuSystemUser(senderRef) ? 'system' : bodyRef ? 'image' : bodyText ? 'text' : 'system';
   const receivedAt = new Date().toISOString();
   const createdAt = normalizeTimestamp(message.createAt);
   return { externalMessageRef, externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef), senderRef: senderRef || undefined, itemRef, direction, bodyType, bodyText, bodyRef, ...(platformSystemMessage ? { platformSystemMessage: true } : {}), riskFlags: createdAt ? undefined : ['source_timestamp_invalid'], createdAt: createdAt ?? receivedAt };

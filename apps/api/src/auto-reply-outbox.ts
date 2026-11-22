@@ -3,6 +3,7 @@ import type { AutoReplyOutboxRecord, ConversationRecord, Store } from './domain.
 import type { MessageService } from './messages.js';
 import type { AutoReplySendInput, AutoReplySender } from './auto-reply.js';
 import { digestJson } from './security.js';
+import { assertXianyuSystemUserPoolReady, isXianyuSystemUser, XIANYU_SYSTEM_USER_IGNORED } from './xianyu-system-users.js';
 
 export const AUTO_REPLY_SEND_OUTBOX_SCOPE = 'auto_reply_send';
 
@@ -49,7 +50,7 @@ export class ReliableExternalAutoReplySender implements AutoReplySender {
   }
 
   async send(input: AutoReplyOutboxSendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string; outboxJobId?: string }> {
-    if (input.mode === 'simulate') return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` };
+    if (input.mode === 'simulate') { await this.assertRecipientAllowed(input); return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` }; }
     const aggregateId = input.runId ?? deterministicAggregateId(input.requestId);
     const payload = payloadFor(input);
     let job = await this.store.getAutoReplyOutbox(AUTO_REPLY_SEND_OUTBOX_SCOPE, input.requestId);
@@ -57,6 +58,7 @@ export class ReliableExternalAutoReplySender implements AutoReplySender {
       job = (await this.store.enqueueAutoReplyOutbox({ scope: AUTO_REPLY_SEND_OUTBOX_SCOPE, aggregateType: 'auto_reply_run', aggregateId, operation: 'send_text', idempotencyKey: input.requestId, payload, traceId: input.traceId })).record;
     }
     if (job.status === 'succeeded' && job.externalMessageRef) return { outcome: 'known_success', externalMessageRef: job.externalMessageRef, outboxJobId: job.id };
+    if (job.status === 'dead_lettered') return { outcome: 'known_failure', outboxJobId: job.id };
     if (job.status === 'processing' && !leaseExpired(job)) return { outcome: 'unknown', outboxJobId: job.id };
     const claimed = await this.store.claimAutoReplyOutbox({ scope: AUTO_REPLY_SEND_OUTBOX_SCOPE, workerId: this.workerId, limit: 1, leaseMs: this.leaseMs, id: job.id });
     const claimedJob = claimed.find((candidate) => candidate.id === job!.id);
@@ -66,12 +68,13 @@ export class ReliableExternalAutoReplySender implements AutoReplySender {
       return { outcome: 'unknown', outboxJobId: current?.id ?? job.id };
     }
     try {
+      await this.assertRecipientAllowed(input);
       const sent = await this.sendExternal(input);
       const completed = await this.store.completeAutoReplyOutbox({ id: claimedJob.id, workerId: this.workerId, externalOutcome: 'known_success', externalMessageRef: sent.externalMessageRef });
       if (!completed) return { outcome: 'unknown', externalMessageRef: sent.externalMessageRef, outboxJobId: claimedJob.id };
       return { outcome: 'known_success', externalMessageRef: sent.externalMessageRef, outboxJobId: claimedJob.id };
     } catch (error) {
-      await this.store.retryAutoReplyOutbox({ id: claimedJob.id, workerId: this.workerId, errorCode: errorCode(error), errorDigest: digestJson({ code: errorCode(error) }), availableAt: new Date(Date.now() + this.retryDelayMs).toISOString() });
+      await this.handleSendFailure(claimedJob.id, error);
       throw error;
     }
   }
@@ -86,18 +89,27 @@ export class ReliableExternalAutoReplySender implements AutoReplySender {
     const outboundMessageIds: string[] = [];
     let senderOutcome: AutoReplyOutboxRecoveryResult['senderOutcome'];
     for (const job of jobs) {
+      if (job.payload.adminId !== input.adminId || job.status === 'dead_lettered') continue;
       let current = job;
       if (current.status !== 'succeeded') {
+        const payload = inputForPayload(current.payload);
+        try { await this.assertRecipientAllowed(payload); } catch (error) {
+          if (errorCode(error) === 'SYSTEM_USERS_CONFIG_UNAVAILABLE') continue;
+          if (errorCode(error) !== XIANYU_SYSTEM_USER_IGNORED) throw error;
+          await this.suppressRun({ ...input, reason: XIANYU_SYSTEM_USER_IGNORED });
+          continue;
+        }
         if (current.status === 'processing' && !leaseExpired(current)) continue;
         const claimed = await this.store.claimAutoReplyOutbox({ scope: AUTO_REPLY_SEND_OUTBOX_SCOPE, workerId: this.workerId, limit: 1, leaseMs: this.leaseMs, id: current.id });
         const claimedJob = claimed.find((candidate) => candidate.id === current.id);
         if (!claimedJob) continue;
         try {
-          const sent = await this.sendExternal(inputForPayload(current.payload));
+          await this.assertRecipientAllowed(payload);
+          const sent = await this.sendExternal(payload);
           if (!await this.store.completeAutoReplyOutbox({ id: current.id, workerId: this.workerId, externalOutcome: 'known_success', externalMessageRef: sent.externalMessageRef })) continue;
           current = { ...current, status: 'succeeded', externalOutcome: 'known_success', externalMessageRef: sent.externalMessageRef };
         } catch (error) {
-          await this.store.retryAutoReplyOutbox({ id: current.id, workerId: this.workerId, errorCode: errorCode(error), errorDigest: digestJson({ code: errorCode(error) }), availableAt: new Date(Date.now() + this.retryDelayMs).toISOString() });
+          await this.handleSendFailure(current.id, error);
           continue;
         }
       }
@@ -117,6 +129,23 @@ export class ReliableExternalAutoReplySender implements AutoReplySender {
       outboundMessageIds.push(outboundMessageId);
     }
     return { outboundMessageIds, senderOutcome };
+  }
+
+  async suppressRun(input: { adminId: string; runId: string; reason: string }): Promise<void> {
+    await this.store.suppressPendingAutoReplyOutbox({ adminId: input.adminId, runId: input.runId, errorCode: input.reason });
+  }
+
+  private async assertRecipientAllowed(input: AutoReplyOutboxSendInput): Promise<void> {
+    const current = await this.store.getConversation(input.adminId, input.conversation.id);
+    if (!current || current.accountId !== input.accountId) throw new Error('CONVERSATION_NOT_FOUND');
+    assertXianyuSystemUserPoolReady();
+    if ([input.recipientRef, input.conversation.buyerRef, current.buyerRef].some(isXianyuSystemUser)) throw new Error(XIANYU_SYSTEM_USER_IGNORED);
+  }
+
+  private async handleSendFailure(id: string, error: unknown): Promise<void> {
+    const code = errorCode(error), errorDigest = digestJson({ code });
+    if (code === XIANYU_SYSTEM_USER_IGNORED) await this.store.deadLetterAutoReplyOutbox({ id, workerId: this.workerId, errorCode: code, errorDigest });
+    else await this.store.retryAutoReplyOutbox({ id, workerId: this.workerId, errorCode: code, errorDigest, availableAt: new Date(Date.now() + this.retryDelayMs).toISOString() });
   }
 }
 
@@ -144,7 +173,7 @@ function inputForPayload(payload: Record<string, unknown>): AutoReplyOutboxSendI
   const conversationId = String(payload.conversationId ?? conversation.id ?? '');
   const accountId = String(payload.accountId ?? conversation.accountId ?? '');
   const recipientRef = String(payload.recipientRef ?? conversation.buyerRef ?? '');
-  const conversationRecord = { id: conversationId, accountId, buyerRef: recipientRef, externalConversationRef: String(conversation.externalConversationRef ?? conversationId), buyerDisplayName: typeof conversation.buyerDisplayName === 'string' ? conversation.buyerDisplayName : undefined } as ConversationRecord;
+  const conversationRecord = { id: conversationId, accountId, buyerRef: String(conversation.buyerRef ?? recipientRef), externalConversationRef: String(conversation.externalConversationRef ?? conversationId), buyerDisplayName: typeof conversation.buyerDisplayName === 'string' ? conversation.buyerDisplayName : undefined } as ConversationRecord;
   return { adminId: String(payload.adminId ?? ''), accountId, requestId: String(payload.requestId ?? ''), conversation: conversationRecord, recipientRef, text: String(payload.text ?? ''), mode: 'live', traceId: String(payload.traceId ?? ''), runId: typeof payload.runId === 'string' ? payload.runId : undefined, inboundMessageId: typeof payload.inboundMessageId === 'string' ? payload.inboundMessageId : undefined, productRef: typeof payload.productRef === 'string' ? payload.productRef : undefined, riskFlags: Array.isArray(payload.riskFlags) ? payload.riskFlags.filter((value): value is string => typeof value === 'string') : [], segmentIndex: typeof payload.segmentIndex === 'number' ? payload.segmentIndex : undefined, segmentCount: typeof payload.segmentCount === 'number' ? payload.segmentCount : undefined };
 }
 

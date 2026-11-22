@@ -2447,6 +2447,10 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`update execution.outbox_jobs set status='dead_lettered',last_error_code=$3,last_error_digest=$4,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.errorCode, input.errorDigest]);
     return result.rowCount === 1;
   }
+  async suppressPendingAutoReplyOutbox(input: { adminId: string; runId: string; errorCode: string }): Promise<number> {
+    const result = await this.pool.query(`update execution.outbox_jobs set status='dead_lettered',last_error_code=$3,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where scope='auto_reply_send' and aggregate_id=$1 and payload_json->>'adminId'=$2 and (status in ('pending','retryable') or (status='processing' and lease_expires_at<=now()))`, [input.runId, input.adminId, input.errorCode]);
+    return result.rowCount ?? 0;
+  }
   async recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void> { await writeAuditEvent(this.pool, event, options?.routine); }
   async cleanupAuditEvents(input: { createdBefore: string; limit?: number }): Promise<number> { return cleanupRecordTable(this.pool, 'observability.audit_events', input); }
 
