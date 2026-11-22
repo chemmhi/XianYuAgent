@@ -80,6 +80,22 @@ for (const kind of dbUrl ? ['memory', 'postgres'] : ['memory']) {
       recover: () => recoverVerificationReads(store, mtop, browser, admin.id, account.id) };
   }
 
+  test(`${kind}: password user.query v4 recovery retains its original request and session identity`,async()=>{
+    const f=await fixture(),api='mtop.taobao.idlemessage.pc.user.query';
+    const request=createVerificationReadRequest(api,'4.0',{type:1,isOwner:false,sessionId:'fixture-chat',sessionType:1})!;
+    const service=new XianyuImService(f.store,f.mtop,{} as never,undefined,undefined,f.browser);
+    const internal=service as any;internal.clients.set(`${f.admin.id}:${f.account.id}`,{connected:true,disconnect:async()=>undefined});
+    try{
+      await f.store.upsertCredential({adminId:f.admin.id,accountId:f.account.id,platform:'xianyu',cookieHeader:`unb=${f.account.sellerRef}; _m_h5_tk=old_suffix`,accessToken:'healthy-im-token',deviceId:'device',metadata:{loginMethod:'password_http',loginUserAgent:'fixture-password-session-ua'}});
+      await f.store.recordAccountRisk({adminId:f.admin.id,accountId:f.account.id,source:api,code:'ACCOUNT_VALIDATION_REQUIRED',recoveryRequest:request});
+      const original=f.browser.waitForCompletion;f.browser.waitForCompletion=async(input:any)=>{assert.equal(input.userAgent,'fixture-password-session-ua');assert.deepEqual(input.readRequest.request,request);return original(input);};
+      service.requestVerificationRecovery(f.admin.id,f.account.id,api);await internal.verificationRecoveryInFlight.get(`${f.admin.id}:${f.account.id}`);
+      assert.deepEqual(f.browserCalls,[api]);assert.equal((await f.store.listAccountVerificationRisks(f.admin.id,f.account.id)).length,0);
+      const saved=await f.store.getCredential(f.admin.id,f.account.id);assert.equal(saved?.accessToken,'healthy-im-token');assert.equal(saved?.metadata?.loginUserAgent,'fixture-password-session-ua');
+      assert.ok(f.requests.every(name=>name===api),'read risk must not refresh a healthy IM or resubmit a password');
+    }finally{await service.close();await f.close();}
+  });
+
   for (const outcome of ['success', 'browser-failed', 'wrong-identity', 'write-failed', 'new-credential', 'revoked', 'new-risk', 'server-still-blocked', 'login-during-server-recheck']) {
     test(`${kind}: original read recovery ${outcome} preserves credential/risk fences`, async () => {
       const f = await fixture();

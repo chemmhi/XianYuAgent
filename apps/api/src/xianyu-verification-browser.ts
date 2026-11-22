@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { createPatchrightVerificationBrowserFactory } from './patchright-verification-browser.js';
-import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuSessionUserAgent } from './xianyu-browser-identity.js';
 import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, XianyuVerificationCookie, XianyuVerificationPage } from './xianyu-browser-port.js';
 import { acquireXianyuVerificationProfileLock } from './xianyu-verification-profile-lock.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
@@ -127,12 +127,14 @@ export class XianyuVerificationBrowser {
     pollIntervalMs?: number;
     imTokenRequest?: XianyuBrowserImTokenRequest;
     readRequest?: { request: XianyuReadRequest; expectedUserId: string };
+    /** Server-owned session identity, retained across HTTP and official verification. */
+    userAgent?: string;
   }): Promise<XianyuVerificationBrowserResult> {
     if (this.mode === 'disabled') throw new Error('XIANYU_VERIFICATION_BROWSER_DISABLED');
     assertVerificationUrl(input.verificationUrl);
     const profileDir = await this.resolveProfileDir(input.profileKey);
     const profileLockKey = normalizeProfileLockKey(profileDir);
-    const verificationKey = `${JSON.stringify(input.verificationSubject ?? null)}\u0000${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}\u0000${JSON.stringify(input.readRequest ?? null)}`;
+    const verificationKey = `${JSON.stringify(input.verificationSubject ?? null)}\u0000${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}\u0000${JSON.stringify(input.readRequest ?? null)}\u0000${JSON.stringify(input.userAgent ?? null)}`;
     const active = activeVerifications.get(verificationKey);
     if (active) return active;
 
@@ -170,6 +172,7 @@ export class XianyuVerificationBrowser {
     pollIntervalMs?: number;
     imTokenRequest?: XianyuBrowserImTokenRequest;
     readRequest?: { request: XianyuReadRequest; expectedUserId: string };
+    userAgent?: string;
   }, profileDir: string): Promise<XianyuVerificationBrowserResult> {
     const maxWaitMs = Math.max(250, Math.floor(input.maxWaitMs ?? this.maxWaitMs));
     const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
@@ -183,7 +186,7 @@ export class XianyuVerificationBrowser {
         headless: useHeadless,
         hideWindow,
         executablePath: this.executablePath,
-        userAgent: this.userAgent,
+        userAgent: input.userAgent===undefined ? this.userAgent : xianyuSessionUserAgent(input.userAgent),
         ...(this.sliderMode === 'auto' ? { sliderStrategy: 'ydisks' as const } : {}),
       });
       try {
